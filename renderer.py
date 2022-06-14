@@ -2,27 +2,35 @@ import torch,os,imageio,sys
 from tqdm.auto import tqdm
 from dataLoader.ray_utils import get_rays
 from models.tensoRF import TensorVM, TensorCP, raw2alpha, TensorVMSplit, AlphaGridMask
+from models.pointTensoRF import PointTensorCP
+from models.pointTensoRF_hier import PointTensorCP_hier
+from models.archive_pointTensoRF import PointTensorCPB, PointTensorCPD, PointTensorVMSplit
 from utils import *
 from dataLoader.ray_utils import ndc_rays_blender
 
 
-def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False, device='cuda'):
+def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ray_type=0, white_bg=True, is_train=False, device='cuda', return_depth=0, tensoRF_per_ray=None, eval=False, rot_step=False):
 
-    rgbs, alphas, depth_maps, weights, uncertainties = [], [], [], [], []
+    rgbs, alphas, depth_maps, weights, uncertainties, rgbpers, ray_ids = [], [], [], [], [], [], []
     N_rays_all = rays.shape[0]
     for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(device)
-    
-        rgb_map, depth_map = tensorf(rays_chunk, is_train=is_train, white_bg=white_bg, ndc_ray=ndc_ray, N_samples=N_samples)
+        tensoRF_per_ray_chunk = tensoRF_per_ray[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(device) if tensoRF_per_ray is not None else None
+        # print("tensoRF_per_ray shape ", rays.shape, rays_chunk.shape, tensoRF_per_ray.shape, tensoRF_per_ray_chunk.shape)
+        rgb_map, depth_map, rgbper, ray_id, weight = tensorf(rays_chunk, is_train=is_train, white_bg=white_bg, ray_type=ray_type, N_samples=N_samples, return_depth=return_depth, tensoRF_per_ray=tensoRF_per_ray_chunk, eval=eval, rot_step=rot_step)
 
         rgbs.append(rgb_map)
         depth_maps.append(depth_map)
-    
-    return torch.cat(rgbs), None, torch.cat(depth_maps), None, None
+        if rgbper is not None:
+            rgbpers.append(rgbper)
+            ray_ids.append(ray_id)
+            weights.append(weight)
+
+    return torch.cat(rgbs), torch.cat(weights), torch.cat(depth_maps) if return_depth else None, torch.cat(rgbpers) if len(rgbpers) > 0 else None, torch.cat(ray_ids) if len(ray_ids) > 0 else None
 
 @torch.no_grad()
-def evaluation(test_dataset,tensorf, args, renderer, savePath=None, N_vis=5, prtx='', N_samples=-1,
-               white_bg=False, ndc_ray=False, compute_extra_metrics=True, device='cuda'):
+def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, prtx='', N_samples=-1,
+               white_bg=False, ray_type=0, compute_extra_metrics=True, device='cuda'):
     PSNRs, rgb_maps, depth_maps = [], [], []
     ssims,l_alex,l_vgg=[],[],[]
     os.makedirs(savePath, exist_ok=True)
@@ -34,15 +42,17 @@ def evaluation(test_dataset,tensorf, args, renderer, savePath=None, N_vis=5, prt
         pass
 
     near_far = test_dataset.near_far
+
     img_eval_interval = 1 if N_vis < 0 else max(test_dataset.all_rays.shape[0] // N_vis,1)
     idxs = list(range(0, test_dataset.all_rays.shape[0], img_eval_interval))
     for idx, samples in tqdm(enumerate(test_dataset.all_rays[0::img_eval_interval]), file=sys.stdout):
 
         W, H = test_dataset.img_wh
         rays = samples.view(-1,samples.shape[-1])
+        cur_tensoRF_per_ray = None
+        # _, _, cur_tensoRF_per_ray = tensorf.filtering_rays(rays, None, bbox_only=True, apply_filter=False)
 
-        rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
-                                        ndc_ray=ndc_ray, white_bg = white_bg, device=device)
+        rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=args.batch_size, N_samples=N_samples, ray_type=ray_type, white_bg = white_bg, device=device, return_depth=1, tensoRF_per_ray = None if cur_tensoRF_per_ray is None else cur_tensoRF_per_ray.cuda() , eval=True)
         rgb_map = rgb_map.clamp(0.0, 1.0)
 
         rgb_map, depth_map = rgb_map.reshape(H, W, 3).cpu(), depth_map.reshape(H, W).cpu()
@@ -83,12 +93,11 @@ def evaluation(test_dataset,tensorf, args, renderer, savePath=None, N_vis=5, prt
         else:
             np.savetxt(f'{savePath}/{prtx}mean.txt', np.asarray([psnr]))
 
-
     return PSNRs
 
 @torch.no_grad()
 def evaluation_path(test_dataset,tensorf, c2ws, renderer, savePath=None, N_vis=5, prtx='', N_samples=-1,
-                    white_bg=False, ndc_ray=False, compute_extra_metrics=True, device='cuda'):
+                    white_bg=False, ray_type=0, compute_extra_metrics=True, device='cuda'):
     PSNRs, rgb_maps, depth_maps = [], [], []
     ssims,l_alex,l_vgg=[],[],[]
     os.makedirs(savePath, exist_ok=True)
@@ -106,12 +115,12 @@ def evaluation_path(test_dataset,tensorf, c2ws, renderer, savePath=None, N_vis=5
 
         c2w = torch.FloatTensor(c2w)
         rays_o, rays_d = get_rays(test_dataset.directions, c2w)  # both (h*w, 3)
-        if ndc_ray:
+        if ray_type == 1:
             rays_o, rays_d = ndc_rays_blender(H, W, test_dataset.focal[0], 1.0, rays_o, rays_d)
         rays = torch.cat([rays_o, rays_d], 1)  # (h*w, 6)
 
         rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=8192, N_samples=N_samples,
-                                        ndc_ray=ndc_ray, white_bg = white_bg, device=device)
+                                        ray_type=ray_type, white_bg = white_bg, device=device)
         rgb_map = rgb_map.clamp(0.0, 1.0)
 
         rgb_map, depth_map = rgb_map.reshape(H, W, 3).cpu(), depth_map.reshape(H, W).cpu()

@@ -31,19 +31,24 @@ def gen_geo(args):
         np.savetxt(args.pointfile, geo.cpu().numpy(), delimiter=";")
     else:
         print("successfully loaded args.pointfile at : ", args.pointfile, geo.shape)
-
+    geo_lst = []
     if args.vox_range is not None and not args.pointfile[:-4].endswith("vox"):
         geo_xyz, confidence = geo[..., :3], geo[..., -1:]
-        geo = mvs_utils.construct_voxrange_points_mean(geo_xyz, torch.as_tensor(args.vox_range, dtype=torch.float32, device=geo.device), vox_center=args.vox_center>0)#, space_min=torch.as_tensor([-1.5,-1.5,-1.5], device=geo.device, dtype=geo.dtype), space_max=torch.as_tensor([1.5,1.5,1.5], device=geo.device, dtype=geo.dtype))
-        print("after vox geo shape", geo.shape)
-        np.savetxt(args.pointfile[:-4] + "_{}_vox".format(args.vox_range[0]) + ".txt", geo.cpu().numpy(), delimiter=";")
+        for i in range(len(args.vox_range)):
+            geo_lvl = mvs_utils.construct_voxrange_points_mean(geo_xyz, torch.as_tensor(args.vox_range[i], dtype=torch.float32, device=geo.device), vox_center=args.vox_center>0)
+            print("after vox geo shape", geo_lvl.shape)
+            np.savetxt(args.pointfile[:-4] + "_{}_vox".format(args.vox_range[i][0]) + ".txt", geo_lvl.cpu().numpy(), delimiter=";")
+            geo_lst.append(geo_lvl.cuda())
 
-    if args.fps_num > 0 and len(geo) > args.fps_num:
-        fps_inds = torch_cluster.fps(geo[...,:3], ratio=args.fps_num/len(geo), random_start=True)
-        geo = geo[fps_inds, ...]
-        print("fps_inds", fps_inds.shape, geo.shape)
-        np.savetxt(args.pointfile[:-4]+"_{}".format(args.fps_num)+".txt", geo.cpu().numpy(), delimiter=";")
-    return geo.cuda()
+    if args.fps_num is not None:
+        for i in range(len(args.fps_num)):
+            if len(geo_lst[i]) > args.fps_num[i]:
+                fps_inds = torch_cluster.fps(geo_lst[i][...,:3], ratio=args.fps_num[i]/len(geo_lst[i]), random_start=True)
+                geo_lvl = geo_lst[i][fps_inds, ...]
+                print("fps_inds", fps_inds.shape, geo_lvl.shape)
+                np.savetxt(args.pointfile[:-4]+"_{}".format(args.fps_num)+".txt", geo_lvl.cpu().numpy(), delimiter=";")
+                geo_lst[i] = geo_lvl.cuda()
+    return geo_lst
 
 def gen_points_filter(dataset, args, model):
     cam_xyz_all = []

@@ -15,11 +15,11 @@ class TensorVM(TensorBase):
 
     
     def get_optparam_groups(self, lr_init_spatialxyz = 0.02, lr_init_network = 0.001):
-        grad_vars = [{'params': self.line_coef, 'lr': lr_init_spatialxyz}, {'params': self.plane_coef, 'lr': lr_init_spatialxyz},
-                         {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
+        grad_vars = [{'params': self.line_coef, 'lr': lr_init_spatialxyz}, {'params': self.plane_coef, 'lr': lr_init_spatialxyz}, {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
         if isinstance(self.renderModule, torch.nn.Module):
             grad_vars += [{'params':self.renderModule.parameters(), 'lr':lr_init_network}]
         return grad_vars
+    
 
     def compute_features(self, xyz_sampled):
 
@@ -43,20 +43,18 @@ class TensorVM(TensorBase):
         
         return sigma_feature, app_features
 
+
     def compute_densityfeature(self, xyz_sampled):
         coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach().view(3, -1, 1, 2)
         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
 
-        plane_feats = F.grid_sample(self.plane_coef[:, -self.density_n_comp:], coordinate_plane, align_corners=True).view(
-                                        -1, *xyz_sampled.shape[:1])
-        line_feats = F.grid_sample(self.line_coef[:, -self.density_n_comp:], coordinate_line, align_corners=True).view(
-                                        -1, *xyz_sampled.shape[:1])
+        plane_feats = F.grid_sample(self.plane_coef[:, -self.density_n_comp:], coordinate_plane, align_corners=True).view(-1, *xyz_sampled.shape[:1])
+        line_feats = F.grid_sample(self.line_coef[:, -self.density_n_comp:], coordinate_line, align_corners=True).view(-1, *xyz_sampled.shape[:1])
         
         sigma_feature = torch.sum(plane_feats * line_feats, dim=0)
-        
-        
         return sigma_feature
+
     
     def compute_appfeature(self, xyz_sampled):
         coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach().view(3, -1, 1, 2)
@@ -160,13 +158,12 @@ class TensorVMSplit(TensorBase):
         return torch.nn.ParameterList(plane_coef).to(device), torch.nn.ParameterList(line_coef).to(device)
     
     
-
-    def get_optparam_groups(self, lr_init_spatialxyz = 0.02, lr_init_network = 0.001):
-        grad_vars = [{'params': self.density_line, 'lr': lr_init_spatialxyz}, {'params': self.density_plane, 'lr': lr_init_spatialxyz},
-                     {'params': self.app_line, 'lr': lr_init_spatialxyz}, {'params': self.app_plane, 'lr': lr_init_spatialxyz},
-                         {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
+    def get_optparam_groups(self, lr_init_spatialxyz = 0.02, lr_init_network = 0.001, skip_zero_grad = True):
+        grad_vars = [{'params': self.density_line, 'lr': lr_init_spatialxyz, 'skip_zero_grad': (skip_zero_grad)}, {'params': self.density_plane, 'lr': lr_init_spatialxyz, 'skip_zero_grad': (skip_zero_grad)},
+                     {'params': self.app_line, 'lr': lr_init_spatialxyz, 'skip_zero_grad': (skip_zero_grad)}, {'params': self.app_plane, 'lr': lr_init_spatialxyz, 'skip_zero_grad': (skip_zero_grad)},
+                         {'params': self.basis_mat.parameters(), 'lr':lr_init_network, 'skip_zero_grad': (False)}]
         if isinstance(self.renderModule, torch.nn.Module):
-            grad_vars += [{'params':self.renderModule.parameters(), 'lr':lr_init_network}]
+            grad_vars += [{'params':self.renderModule.parameters(), 'lr':lr_init_network, 'skip_zero_grad': (False)}]
         return grad_vars
 
 
@@ -344,8 +341,7 @@ class TensorCP(TensorBase):
         line_coef_point = line_coef_point * F.grid_sample(self.density_line[2], coordinate_line[[2]],
                                         align_corners=True).view(-1, *xyz_sampled.shape[:1])
         sigma_feature = torch.sum(line_coef_point, dim=0)
-        
-        
+
         return sigma_feature
     
     def compute_appfeature(self, xyz_sampled):

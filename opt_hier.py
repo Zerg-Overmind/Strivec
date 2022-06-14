@@ -25,7 +25,7 @@ def config_parser(cmd=None):
     parser.add_argument('--downsample_train', type=float, default=1.0)
     parser.add_argument('--downsample_test', type=float, default=1.0)
     parser.add_argument('--model_name', type=str, default='PointTensorCP',
-                        choices=['PointTensorCP','PointTensorCPB' ,'PointTensorCPD', 'PointTensorVMSplit'])
+                        choices=['PointTensorCP', 'PointTensorCP_hier','PointTensorCPB' ,'PointTensorCPD', 'PointTensorVMSplit'])
     parser.add_argument('--gpu_ids',
                         type=str,
                         default='0',
@@ -50,8 +50,13 @@ def config_parser(cmd=None):
     )
     parser.add_argument("--vox_res", type=int, default=0,
                         help='resolution of voxlization to filter points')
-    parser.add_argument("--fps_num", type=int, default=None,
-                        help='number of points after farthest point sampling')
+    parser.add_argument(
+        '--fps_num',
+        type=int,
+        nargs='+',
+        default=None,
+        help='final local dimension in each tensoRF'
+    )
     parser.add_argument("--shp_rand", type=float, default=0)
 
     # local pointTensor
@@ -109,9 +114,28 @@ def config_parser(cmd=None):
     parser.add_argument("--ji", type=int, default=0)
     parser.add_argument("--rot_KNN", type=int, default=None, help="if use KNN for sampling during rotation optimization")
     parser.add_argument("--KNN", type=int, default=1, help="if use KNN for sampling")
-    parser.add_argument("--max_tensoRF", type=int, default=32)
-    parser.add_argument("--rot_max_tensoRF", type=int, default=None)
-    parser.add_argument("--K_tensoRF", type=int, default=32)
+    parser.add_argument(
+        '--max_tensoRF',
+        type=int,
+        nargs='+',
+        default=[4],
+        help='final local dimension in each tensoRF'
+    )
+    parser.add_argument(
+        '--rot_max_tensoRF',
+        type=int,
+        nargs='+',
+        default=None,
+        help='final local dimension in each tensoRF'
+    )
+    parser.add_argument(
+        '--K_tensoRF',
+        type=int,
+        nargs='+',
+        default=None,
+        help='final local dimension in each tensoRF'
+    )
+
     parser.add_argument("--rot_K_tensoRF", type=int, default=None)
     parser.add_argument("--intrp_mthd", type=str, default="linear", choices=['linear', 'avg', 'quadric'])
 
@@ -157,7 +181,7 @@ def config_parser(cmd=None):
     # volume options
     parser.add_argument("--n_lamb_sigma", type=int, action="append")
     parser.add_argument("--n_lamb_sh", type=int, action="append")
-    parser.add_argument("--data_dim_color", type=int, default=27)
+    parser.add_argument("--data_dim_color", type=int, nargs='+', default=(27))
 
     parser.add_argument("--rm_weight_mask_thre", type=float, default=0.0001,
                         help='mask points in ray marching')

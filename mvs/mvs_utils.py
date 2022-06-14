@@ -581,6 +581,7 @@ def construct_voxrange_points_mean(geo, vox_range, partition_xyz=None, space_min
     odd_even = torch.ceil(space_edge / vox_range).to(torch.int32).cpu().tolist()
     print("space_edge", space_edge)
     print("odd_even", odd_even)
+    print("vox_range", vox_range, odd_even)
     shift_range = torch.as_tensor([vox_range[0].cpu().item() / 2 if odd_even[0] % 2 ==1 else 0, vox_range[1].cpu().item() / 2 if odd_even[1] % 2 ==1 else 0, vox_range[2].cpu().item() / 2 if odd_even[2] % 2 ==1 else 0], device = xyz.device, dtype=xyz.dtype)
     shift = (xyz_mid - shift_range)[None, ...]  # shift = space_min[None, ...]
     print("shift_range", shift_range)

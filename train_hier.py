@@ -1,7 +1,7 @@
 
 import os
 from tqdm.auto import tqdm
-from opt import config_parser
+from opt_hier import config_parser
 args = config_parser()
 print(args)
 os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu_ids
@@ -9,7 +9,7 @@ from models.apparatus import *
 
 
 
-from recon_prior import gen_geo
+from recon_prior_hier import gen_geo
 
 import json, random
 from renderer import *
@@ -75,7 +75,6 @@ def render_test(args, geo):
     kwargs.update({'geo': geo, "args":args, "local_dims":args.local_dims_final})
 
     kwargs.update({'step_ratio': args.step_ratio})
-    print("kwargs", kwargs)
     tensorf = eval(args.model_name)(**kwargs)
     tensorf.load(ckpt)
 
@@ -109,8 +108,6 @@ def reconstruction(args, geo):
 
     # init resolution
     update_AlphaMask_list = args.update_AlphaMask_list
-    n_lamb_sigma = args.n_lamb_sigma
-    n_lamb_sh = args.n_lamb_sh
 
     if args.add_timestamp:
         logfolder = f'{args.basedir}/{args.expname}{datetime.datetime.now().strftime("-%Y%m%d-%H%M%S")}'
@@ -127,8 +124,6 @@ def reconstruction(args, geo):
     # init parameters
     # tensorVM, renderer = init_parameters(args, train_dataset.scene_bbox.to(device), reso_list[0])
     aabb = train_dataset.scene_bbox.to(device)
-
-
     if args.ckpt is not None:
         ckpt = torch.load(args.ckpt, map_location=device)
         kwargs = ckpt['kwargs']
@@ -137,12 +132,12 @@ def reconstruction(args, geo):
         tensorf.load(ckpt)
     else:
         tensorf = eval(args.model_name)(aabb, None, device,
-            density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh, app_dim=args.data_dim_color,
-            near_far=near_far, shadingMode=args.shadingMode, alphaMask_thres=args.alpha_mask_thre,
-            density_shift=args.density_shift, distance_scale=args.distance_scale,
-            pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe, featureC=args.featureC,
-            step_ratio=args.step_ratio, fea2denseAct=args.fea2denseAct,
-            local_dims=args.local_dims_init, geo=geo, args=args)
+            density_n_comp=args.n_lamb_sigma, appearance_n_comp=args.n_lamb_sh,
+            app_dim=args.data_dim_color, near_far=near_far, shadingMode=args.shadingMode,
+            alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift,
+            distance_scale=args.distance_scale, pos_pe=args.pos_pe, view_pe=args.view_pe,
+            fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
+            fea2denseAct=args.fea2denseAct, local_dims=args.local_dims_init, geo=geo, args=args)
 
     skip_zero_grad = args.skip_zero_grad
     grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis, skip_zero_grad = skip_zero_grad > 0)
@@ -161,22 +156,28 @@ def reconstruction(args, geo):
     dim_lst = []
     # set upsample voxel dims
     if args.local_dims_trend is not None:
-        assert args.upsamp_list is not None and len(args.upsamp_list) == len(args.local_dims_trend), "args.local_dims_trend and args.upsamp_list mismatch "
-        for i in range(len(args.local_dims_init)):
-            trend = torch.as_tensor(args.local_dims_trend, device="cuda")
-            dim_lst.append(torch.floor(trend * args.local_dims_final[i] / args.local_dims_final[0]).long())
+        assert args.upsamp_list is not None and len(args.upsamp_list) == len(args.local_dims_trend[0]), "args.local_dims_trend and args.upsamp_list mismatch "
+        for i in range(len(args.local_dims_trend)):
+            level_dim_lst = []
+            trend = torch.as_tensor(args.local_dims_trend[i], device="cuda")
+            for j in range(len(args.local_dims_init[i])):
+                level_dim_lst.append(torch.floor(trend * args.local_dims_final[i][j] / args.local_dims_final[i][0]).long())
+            dim_lst.append(torch.stack(level_dim_lst, dim=-1))
+
     else:
-        #linear in logrithmic space
         for i in range(len(args.local_dims_init)):
-            dim_lst.append((torch.floor(torch.exp2(torch.linspace(np.log2(args.local_dims_init[i]-1), np.log2(args.local_dims_final[i]-1), len(args.upsamp_list)+1))/2)*2 + 1).long()[1:] if args.upsamp_list is not None else None)
+            level_dim_lst = []
+            for j in range(len(args.local_dims_init[i])):
+                level_dim_lst.append((torch.floor(torch.exp2(torch.linspace(np.log2(args.local_dims_init[i][j]-1), np.log2(args.local_dims_final[i][j]-1), len(args.upsamp_list)+1))/2)*2 + 1).long()[1:] if args.upsamp_list is not None else None)
+            dim_lst.append(torch.stack(level_dim_lst, dim=-1))
 
     if args.upsamp_list is not None:
-        local_dim_list = torch.stack(dim_lst, dim=-1).tolist()
+        local_dim_list = torch.stack(dim_lst, dim=1).tolist()
     else:
         local_dim_list = None
 
     torch.cuda.empty_cache()
-    PSNRs, PSNRs_test = [],[0]
+    PSNRs,PSNRs_test = [],[0]
 
     allrays, allrgbs = train_dataset.all_rays, train_dataset.all_rgbs
 
@@ -264,6 +265,7 @@ def reconstruction(args, geo):
         if cur_rot_step:
             geo_optimizer.zero_grad()
         total_loss.backward()
+        # print("tensorf.basis_mat[0]", cur_rot_step, tensorf.density_line[0].grad)
         # if not rot_step:
         optimizer.step()
         if cur_rot_step:
@@ -362,18 +364,49 @@ def reconstruction(args, geo):
         os.makedirs(f'{logfolder}/imgs_path_all', exist_ok=True)
         evaluation_path(test_dataset, tensorf, c2ws, renderer, f'{logfolder}/imgs_path_all/', N_vis=-1, N_samples=-1, white_bg = white_bg, ray_type=ray_type,device=device)
 
-def add_dim(obj):
-    if not isinstance(obj[0], list):
-        return [obj]
-    else:
+def add_dim(obj, times, div=False):
+    if obj is None:
         return obj
+    elif div:
+        obj_lst = []
+        for j in range(times):
+            leng = len(obj) // times
+            obj_lst.append([obj[i] for i in range(j*leng, j*leng+leng)])
+        return obj_lst
+    else:
+        assert len(obj) % times == 0, "{} should be times of 3".format(obj)
+        obj_lst = []
+        for j in range(len(obj) // times):
+            obj_lst.append([obj[j*times+i] for i in range(times)])
+        return obj_lst
+
+
+def comp_revise(args):
+    args.local_dims_trend = add_dim(args.local_dims_trend, len(args.max_tensoRF), div=True)
+    args.local_range = add_dim(args.local_range, 3)
+    args.local_dims_init = add_dim(args.local_dims_init, 3)
+    args.local_dims_final = add_dim(args.local_dims_final, 3)
+    args.n_lamb_sigma = add_dim(args.n_lamb_sigma, 1)
+    args.n_lamb_sh = add_dim(args.n_lamb_sh, 1)
+    args.vox_range = add_dim(args.vox_range, 3)
+    print("local_dims_trend", args.local_dims_trend)
+    print("local_range", args.local_range)
+    print("local_dims_init", args.local_dims_init)
+    print("local_dims_final", args.local_dims_final)
+    print("n_lamb_sigma", args.n_lamb_sigma)
+    print("n_lamb_sh", args.n_lamb_sh)
+    print("vox_range", args.vox_range)
+    return args
 
 if __name__ == '__main__':
 
     torch.set_default_dtype(torch.float32)
     torch.manual_seed(20211202)
     np.random.seed(20211202)
+    args = comp_revise(args)
+
     geo = gen_geo(args)
+
 
     if args.export_mesh:
         export_mesh(args, geo)

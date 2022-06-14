@@ -25,6 +25,14 @@ search_geo_cuda = load(
         for path in ['cuda/search_geo.cpp', 'cuda/search_geo.cu']],
     verbose=True)
 
+#
+# search_geo_hier_cuda = load(
+#     name='search_geo_hier_cuda',
+#     sources=[
+#         os.path.join(parent_dir, path)
+#         for path in ['cuda/search_geo_hier.cpp', 'cuda/search_geo_hier.cu']],
+#     verbose=True)
+
 
 def positional_encoding(positions, freqs):
     freq_bands = (2 ** torch.arange(freqs).float()).to(positions.device)  # (F,)
@@ -75,14 +83,14 @@ def filter_ray_by_projection(rays_o, rays_d, geo, half_range):
     tensoRF_per_ray = render_utils_cuda.filter_ray_by_projection(rays_o.contiguous(), rays_d.contiguous(), geo.contiguous(), torch.square(half_range))
     return tensoRF_per_ray
 
-def filter_ray_by_cvrg(xyz_sampled,mask_inbox, units, xyz_min, xyz_max, tensoRF_cvrg_inds):
+def filter_ray_by_cvrg(xyz_sampled,mask_inbox, units, xyz_min, xyz_max, tensoRF_cvrg_mask):
     # xyz_dist = torch.abs(
     #     xyz_sampled[..., None, :] - geo[None, None, ..., :3])  # chunksize * raysampleN * 4096 * 3
     # mask_inrange = torch.all(xyz_dist <= self.local_range[None, None, None, :],
     #                          dim=-1)  # chunksize * raysampleN * 4096
     # mask_inrange = torch.any(mask_inrange.view(mask_inrange.shape[0], -1), dim=-1)
     # rays_d has to be unit
-    tensoRF_per_ray = search_geo_cuda.filter_ray_by_cvrg(xyz_sampled.contiguous(), mask_inbox.contiguous(), units.contiguous(), xyz_min.contiguous(), xyz_max.contiguous(), tensoRF_cvrg_inds.contiguous())
+    tensoRF_per_ray = search_geo_cuda.filter_ray_by_cvrg(xyz_sampled.contiguous(), mask_inbox.contiguous(), units.contiguous(), xyz_min.contiguous(), xyz_max.contiguous(), tensoRF_cvrg_mask)
     return tensoRF_per_ray
 
 class AlphaGridMask(torch.nn.Module):
@@ -115,7 +123,8 @@ class AlphaGridMask(torch.nn.Module):
 class MLPRender_Fea(torch.nn.Module):
     def __init__(self, inChanel, viewpe=6, feape=6, featureC=128):
         super(MLPRender_Fea, self).__init__()
-
+        if isinstance(inChanel, list):
+            inChanel = sum(inChanel)
         self.in_mlpC = 2 * viewpe * 3 + 2 * feape * inChanel + 3 + inChanel
         self.viewpe = viewpe
         self.feape = feape
@@ -310,3 +319,19 @@ class Alphas2Weights(torch.autograd.Function):
             i_start, i_end, ctx.n_rays, grad_weights, grad_last)
         return grad, None, None
 
+
+def randomize_ray(rays_o, rgb_train, alpha, ijs, c2ws, focal, cent):
+    b, _ = rays_o.shape
+    xyshift = torch.rand(b, 1, 1, 2, device=rgb_train.device)
+    inds = torch.round(xyshift).long()
+    revers_mask = alpha[torch.arange(b, dtype=torch.int64, device=rgb_train.device), inds[:, 0, 0, 0], inds[:, 0, 0, 1]]
+    # print("revers_mask", revers_mask.shape, torch.sum(revers_mask))
+    xyshift[revers_mask] = 0.5
+    xyshift = xyshift * 2 - 1
+    rgbs = torch.nn.functional.grid_sample(rgb_train, xyshift, mode='bilinear', align_corners=True)[..., 0, 0]
+    # print("rgbs", rgbs.shape)
+    inds = ijs + xyshift[:,0,0,:]
+    directions = torch.stack([(inds[...,0] - cent[0]) / focal, (inds[...,1] - cent[1]) / focal, torch.ones_like(inds[...,0])], -1)  # (H, W, 3)
+    directions /= torch.norm(directions, dim=-1, keepdim=True)
+    rays_d = torch.matmul(directions[:,None,:], c2ws).squeeze(1)
+    return torch.cat([rays_o, rays_d], dim=1), rgbs

@@ -590,9 +590,6 @@ __global__ void find_tensoRF_and_repos_cuda_kernel(
     const float rel_z = pz - geo_xyz[offset_t+2];
 
     local_kernel_dist[idx] = sqrt(rel_x * rel_x + rel_y * rel_y + rel_z * rel_z);
-    //if (local_kernel_dist[idx] > 0.4){
-    //    printf("rel_x %f, rel_y %f, rel_z %f;  ", rel_x, rel_y, rel_z);
-    //}
 
     const float softindx = (rel_c_x + local_range[0]) / units[0];
     const float softindy = (rel_c_y + local_range[1]) / units[1];
@@ -715,7 +712,6 @@ __global__ void find_tensoRF_and_repos_cuda_kernel_bk(
 
 
 __global__ void __fill_agg_id(
-        int64_t* __restrict__ cvrg_count,
         int64_t* __restrict__ cvrg_cumsum,
         int64_t* __restrict__ final_agg_id,
         const int n_sample) {
@@ -970,10 +966,9 @@ __global__ void count_tensoRF_cvrg_cuda_kernel(
 
      const int inds = indx * gridYZ + indy * gridZ + indz;
      const int cvrg_id = tensoRF_cvrg_inds[inds];
-     if (cvrg_id >= 0){
-        cvrg_inds[idx] = cvrg_id;
-        cvrg_count[idx] = tensoRF_count[cvrg_id];
-     }
+     cvrg_inds[idx] = cvrg_id;
+     cvrg_count[idx] = tensoRF_count[cvrg_id];
+     // const int cur_count = tensoRF_count[cvrg_id];
   }
 }
 
@@ -1394,7 +1389,7 @@ __global__ void filter_ray_by_cvrg_cuda_kernel(
     scalar_t* __restrict__ units,
     scalar_t* __restrict__ xyz_min,
     scalar_t* __restrict__ xyz_max,
-    bool* __restrict__ tensoRF_cvrg_mask,
+    int64_t* __restrict__ tensoRF_cvrg_inds,
     const int n_rays,
     const int n_samp,
     const int gridX,
@@ -1410,14 +1405,13 @@ __global__ void filter_ray_by_cvrg_cuda_kernel(
      const int indy = min(gridY-1, (int)((xyz_sampled[xyzshift + 1] - xyz_min[1]) / units[1]));
      const int indz = min(gridZ-1, (int)((xyz_sampled[xyzshift + 2] - xyz_min[2]) / units[2]));
      const int inds = indx * gridY * gridZ + indy * gridZ + indz;
-     sample_mask[idx] = tensoRF_cvrg_mask[inds];
+     sample_mask[idx] = (tensoRF_cvrg_inds[inds] >= 0);
   }
 }
 
 
 template <typename scalar_t>
-__global__ void get_geo_inds_cuda_kernel_bk(
-        scalar_t* __restrict__ local_range,
+__global__ void get_geo_inds_cuda_kernel(
         int64_t* __restrict__ local_dims,
         int64_t* __restrict__ gridSize,
         scalar_t* __restrict__ units,
@@ -1459,58 +1453,6 @@ __global__ void get_geo_inds_cuda_kernel_bk(
             int shifty = j * gz;
             for (int k = zmin; k < zmax; k++){
                 tensoRF_cvrg_inds[shiftx + shifty + k] = 1;
-            }
-        }
-     }
-  }
-}
-
-template <typename scalar_t>
-__global__ void get_geo_inds_cuda_kernel(
-        scalar_t* __restrict__ local_range,
-        int64_t* __restrict__ local_dims,
-        int64_t* __restrict__ gridSize,
-        scalar_t* __restrict__ units,
-        scalar_t* __restrict__ xyz_min,
-        scalar_t* __restrict__ xyz_max,
-        scalar_t* __restrict__ pnt_xyz,
-        scalar_t* __restrict__ pnt_xyz_recenter,
-        int64_t* __restrict__ tensoRF_cvrg_inds,
-        const int n_pts
-        ) {
-  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if(idx<n_pts) {
-     const int i_shift = idx * 3;
-     const float px = pnt_xyz[i_shift];
-     const float py = pnt_xyz[i_shift+1];
-     const float pz = pnt_xyz[i_shift+2];
-
-     const int xind = (px - xyz_min[0]) / units[0];
-     const int yind = (py - xyz_min[1]) / units[1];
-     const int zind = (pz - xyz_min[2]) / units[2];
-     const int gx = gridSize[0];
-     const int gy = gridSize[1];
-     const int gz = gridSize[2];
-     const int lx = floor(local_dims[0] / 2);
-     const int ly = floor(local_dims[1] / 2);
-     const int lz = floor(local_dims[2] / 2);
-     pnt_xyz_recenter[i_shift] = xyz_min[0] + (xind + 0.5) * units[0];
-     pnt_xyz_recenter[i_shift+1] = xyz_min[1] + (yind + 0.5) * units[1];
-     pnt_xyz_recenter[i_shift+2] = xyz_min[2] + (zind + 0.5) * units[2];
-     const int xmin = max(min(xind-lx, gx), 0);
-     const int xmax = max(min(xind+lx+1, gx), 0);
-     const int ymin = max(min(yind-ly, gy), 0);
-     const int ymax = max(min(yind+ly+1, gy), 0);
-     const int zmin = max(min(zind-lz, gz), 0);
-     const int zmax = max(min(zind+lz+1, gz), 0);
-     for (int i = xmin; i < xmax; i++){
-        int shiftx = i * gy * gz;
-        for (int j = ymin; j < ymax; j++){
-            int shifty = j * gz;
-            for (int k = zmin; k < zmax; k++){
-                if (min(abs(px - xyz_min[0] - i * units[0]), abs(px - xyz_min[0] - (i+1) * units[0])) < local_range[0] && min(abs(py - xyz_min[1] - j * units[1]), abs(py - xyz_min[1] - (j+1) * units[1])) < local_range[1] && min(abs(pz - xyz_min[2] - k * units[2]), abs(pz - xyz_min[2] - (k+1) * units[2])) < local_range[2]) {
-                    tensoRF_cvrg_inds[shiftx + shifty + k] = 1;
-                }
             }
         }
      }
@@ -1753,7 +1695,6 @@ std::vector<torch::Tensor> build_tensoRF_map_cuda(
 
   AT_DISPATCH_FLOATING_TYPES(pnt_xyz.type(), "get_geo_inds", ([&] {
     get_geo_inds_cuda_kernel<scalar_t><<<(n_pts+threads-1)/threads, threads>>>(
-        local_range.data<scalar_t>(),
         local_dims.data<int64_t>(),
         gridSize.data<int64_t>(),
         units.data<scalar_t>(),
@@ -1857,12 +1798,12 @@ torch::Tensor filter_ray_by_cvrg_cuda(
         torch::Tensor units,
         torch::Tensor xyz_min,
         torch::Tensor xyz_max,
-        torch::Tensor tensoRF_cvrg_mask){
+        torch::Tensor tensoRF_cvrg_inds){
   const int n_rays = xyz_sampled.size(0);
   const int n_samp = xyz_sampled.size(1);
-  const int gridX = tensoRF_cvrg_mask.size(0);
-  const int gridY = tensoRF_cvrg_mask.size(1);
-  const int gridZ = tensoRF_cvrg_mask.size(2);
+  const int gridX = tensoRF_cvrg_inds.size(0);
+  const int gridY = tensoRF_cvrg_inds.size(1);
+  const int gridZ = tensoRF_cvrg_inds.size(2);
   const int threads = 256; // 256
 
   auto sample_mask = torch::zeros({n_rays, n_samp}, torch::dtype(torch::kBool).device(torch::kCUDA));
@@ -1877,7 +1818,7 @@ torch::Tensor filter_ray_by_cvrg_cuda(
         units.data<scalar_t>(),
         xyz_min.data<scalar_t>(),
         xyz_max.data<scalar_t>(),
-        tensoRF_cvrg_mask.data<bool>(),
+        tensoRF_cvrg_inds.data<int64_t>(),
         n_rays,
         n_samp,
         gridX,
@@ -2289,7 +2230,8 @@ std::vector<torch::Tensor> sample_pts_on_rays_sphere_cvrg_cuda(
 
 
 std::vector<torch::Tensor> sample_2_tensoRF_cvrg_cuda(
-        torch::Tensor xyz_sampled, torch::Tensor xyz_min, torch::Tensor xyz_max, torch::Tensor units, torch::Tensor local_range, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds,
+        torch::Tensor xyz_sampled, torch::Tensor xyz_min, torch::Tensor xyz_max, torch::Tensor units,
+        torch::Tensor local_range, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds,
         torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_xyz_recenter, torch::Tensor geo_xyz, const int K, const bool KNN) {
 
   const int threads = 256;
@@ -2302,7 +2244,7 @@ std::vector<torch::Tensor> sample_2_tensoRF_cvrg_cuda(
   const int gridZ = tensoRF_cvrg_inds.size(2);
 
   auto cvrg_inds = torch::empty({n_sample}, torch::dtype(torch::kInt64).device(torch::kCUDA));
-  auto cvrg_count = torch::zeros({n_sample}, torch::dtype(torch::kInt64).device(torch::kCUDA));
+  auto cvrg_count = torch::empty({n_sample}, torch::dtype(torch::kInt64).device(torch::kCUDA));
 
   AT_DISPATCH_FLOATING_TYPES(xyz_sampled.type(), "count_tensoRF_cvrg_cuda", ([&] {
     count_tensoRF_cvrg_cuda_kernel<scalar_t><<<(n_sample+threads-1)/threads, threads>>>(
@@ -2321,44 +2263,41 @@ std::vector<torch::Tensor> sample_2_tensoRF_cvrg_cuda(
 
   auto cvrg_cumsum = cvrg_count.cumsum(0);
   const int cvrg_len = cvrg_count.sum().item<int>();
-  // const int64_t cvrg_len = cvrg_count.sum().item<int64_t>();
 
   auto final_tensoRF_id = torch::empty({cvrg_len}, torch::dtype(torch::kInt64).device(torch::kCUDA));
   auto final_agg_id = torch::empty({cvrg_len}, torch::dtype(torch::kInt64).device(torch::kCUDA));
 
+  __fill_agg_id<<<(n_sample+threads-1)/threads, threads>>>(cvrg_cumsum.data<int64_t>(), final_agg_id.data<int64_t>(), n_sample);
+  // torch::cuda::synchronize();
   auto local_gindx_s = torch::empty({cvrg_len, 3}, torch::dtype(torch::kInt64).device(torch::kCUDA));
   auto local_gindx_l = torch::empty({cvrg_len, 3}, torch::dtype(torch::kInt64).device(torch::kCUDA));
   auto local_gweight_s = torch::empty({cvrg_len, 3}, torch::dtype(xyz_sampled.dtype()).device(torch::kCUDA));
   auto local_gweight_l = torch::empty({cvrg_len, 3}, torch::dtype(xyz_sampled.dtype()).device(torch::kCUDA));
   auto local_kernel_dist = torch::empty({cvrg_len}, torch::dtype(xyz_sampled.dtype()).device(torch::kCUDA));
-  if (cvrg_len > 0){
-      __fill_agg_id<<<(n_sample+threads-1)/threads, threads>>>(cvrg_count.data<int64_t>(), cvrg_cumsum.data<int64_t>(), final_agg_id.data<int64_t>(), n_sample);
-      // torch::cuda::synchronize();
-      AT_DISPATCH_FLOATING_TYPES(xyz_sampled.type(), "find_tensoRF_and_repos_cuda", ([&] {
-        find_tensoRF_and_repos_cuda_kernel<scalar_t><<<(cvrg_len+threads-1)/threads, threads>>>(
-            xyz_sampled.data<scalar_t>(),
-            geo_xyz.data<scalar_t>(),
-            geo_xyz_recenter.data<scalar_t>(),
-            final_agg_id.data<int64_t>(),
-            final_tensoRF_id.data<int64_t>(),
-            local_range.data<scalar_t>(),
-            local_dims.data<int64_t>(),
-            local_gindx_s.data<int64_t>(),
-            local_gindx_l.data<int64_t>(),
-            local_gweight_s.data<scalar_t>(),
-            local_gweight_l.data<scalar_t>(),
-            local_kernel_dist.data<scalar_t>(),
-            units.data<scalar_t>(),
-            tensoRF_topindx.data<int64_t>(),
-            cvrg_inds.data<int64_t>(),
-            cvrg_cumsum.data<int64_t>(),
-            cvrg_count.data<int64_t>(),
-            cvrg_len,
-            K,
-            maxK);
-       }));
-  }
-  // torch::cuda::synchronize();
+  AT_DISPATCH_FLOATING_TYPES(xyz_sampled.type(), "find_tensoRF_and_repos_cuda_bk", ([&] {
+    find_tensoRF_and_repos_cuda_kernel<scalar_t><<<(cvrg_len+threads-1)/threads, threads>>>(
+        xyz_sampled.data<scalar_t>(),
+        geo_xyz.data<scalar_t>(),
+        geo_xyz_recenter.data<scalar_t>(),
+        final_agg_id.data<int64_t>(),
+        final_tensoRF_id.data<int64_t>(),
+        local_range.data<scalar_t>(),
+        local_dims.data<int64_t>(),
+        local_gindx_s.data<int64_t>(),
+        local_gindx_l.data<int64_t>(),
+        local_gweight_s.data<scalar_t>(),
+        local_gweight_l.data<scalar_t>(),
+        local_kernel_dist.data<scalar_t>(),
+        units.data<scalar_t>(),
+        tensoRF_topindx.data<int64_t>(),
+        cvrg_inds.data<int64_t>(),
+        cvrg_cumsum.data<int64_t>(),
+        cvrg_count.data<int64_t>(),
+        cvrg_len,
+        K,
+        maxK);
+   }));
+
   return {local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, final_tensoRF_id, final_agg_id};
 }
 
@@ -2386,7 +2325,7 @@ std::vector<torch::Tensor> sample_2_tensoRF_cvrg_cuda_bk(
   auto final_tensoRF_id = torch::empty({n_sampleK}, torch::dtype(torch::kInt64).device(torch::kCUDA));
   auto tensoRF_mask = torch::zeros({n_sample, K}, torch::dtype(torch::kBool).device(torch::kCUDA));
 
-  AT_DISPATCH_FLOATING_TYPES(xyz_sampled.type(), "find_tensoRF_and_repos_cuda_bk", ([&] {
+  AT_DISPATCH_FLOATING_TYPES(xyz_sampled.type(), "find_tensoRF_and_repos_cuda", ([&] {
       find_tensoRF_and_repos_cuda_kernel_bk<scalar_t><<<(n_sampleK+threads-1)/threads, threads>>>(
         xyz_sampled.data<scalar_t>(),
         geo_xyz.data<scalar_t>(),
@@ -2419,7 +2358,7 @@ std::vector<torch::Tensor> sample_2_tensoRF_cvrg_cuda_bk(
 
   auto final_agg_id = torch::empty({cvrg_len}, torch::dtype(torch::kInt64).device(torch::kCUDA));
 
-  __fill_agg_id<<<(n_sample+threads-1)/threads, threads>>>(cvrg_count.data<int64_t>(), cvrg_cumsum.data<int64_t>(), final_agg_id.data<int64_t>(), n_sample);
+  __fill_agg_id<<<(n_sample+threads-1)/threads, threads>>>(cvrg_cumsum.data<int64_t>(), final_agg_id.data<int64_t>(), n_sample);
 
   return {tensoRF_mask.reshape(-1), local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, final_tensoRF_id, final_agg_id};
 }
@@ -2513,7 +2452,7 @@ std::vector<torch::Tensor> sample_2_rot_tensoRF_cvrg_cuda(
 
   auto final_agg_id = torch::empty({cvrg_len}, torch::dtype(torch::kInt64).device(torch::kCUDA));
 
-  __fill_agg_id<<<(n_sample+threads-1)/threads, threads>>>(cvrg_count.data<int64_t>(), cvrg_cumsum.data<int64_t>(), final_agg_id.data<int64_t>(), n_sample);
+  __fill_agg_id<<<(n_sample+threads-1)/threads, threads>>>(cvrg_cumsum.data<int64_t>(), final_agg_id.data<int64_t>(), n_sample);
   // torch::cuda::synchronize();
 
   return {tensoRF_mask.reshape(-1), local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, final_tensoRF_id, final_agg_id};
@@ -2602,7 +2541,7 @@ std::vector<torch::Tensor> sample_2_rotdist_tensoRF_cvrg_cuda(
 
   auto final_agg_id = torch::empty({cvrg_len}, torch::dtype(torch::kInt64).device(torch::kCUDA));
 
-  __fill_agg_id<<<(n_sample+threads-1)/threads, threads>>>(cvrg_count.data<int64_t>(), cvrg_cumsum.data<int64_t>(), final_agg_id.data<int64_t>(), n_sample);
+  __fill_agg_id<<<(n_sample+threads-1)/threads, threads>>>(cvrg_cumsum.data<int64_t>(), final_agg_id.data<int64_t>(), n_sample);
   // torch::cuda::synchronize();
 
   return {tensoRF_mask.reshape(-1), dist, local_kernel_dist, final_tensoRF_id, final_agg_id};
@@ -2663,7 +2602,7 @@ std::vector<torch::Tensor> sample_2_sphere_tensoRF_cvrg_cuda(
 
   auto final_agg_id = torch::empty({cvrg_len}, torch::dtype(torch::kInt64).device(torch::kCUDA));
 
-  __fill_agg_id<<<(n_sample+threads-1)/threads, threads>>>(cvrg_count.data<int64_t>(), cvrg_cumsum.data<int64_t>(), final_agg_id.data<int64_t>(), n_sample);
+  __fill_agg_id<<<(n_sample+threads-1)/threads, threads>>>(cvrg_cumsum.data<int64_t>(), final_agg_id.data<int64_t>(), n_sample);
   // torch::cuda::synchronize();
 
   return {tensoRF_mask.reshape(-1), local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, final_tensoRF_id, final_agg_id};

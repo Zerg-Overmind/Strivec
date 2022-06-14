@@ -4,6 +4,7 @@ from PIL import Image
 import torchvision.transforms as T
 import torch.nn.functional as F
 import scipy.signal
+import importlib
 
 mse2psnr = lambda x : -10. * torch.log(x) / torch.log(torch.Tensor([10.]))
 
@@ -216,3 +217,46 @@ def convert_sdf_samples_to_ply(
     ply_data = plyfile.PlyData([el_verts, el_faces])
     print("saving mesh to %s" % (ply_filename_out))
     ply_data.write(ply_filename_out)
+
+
+def masking(mask, firstdim_lst, seconddim_lst):
+    first_lst = [item[mask, ...] if item is not None else None for item in firstdim_lst]
+    second_lst = [item[:, mask, ...] if item is not None else None for item in seconddim_lst]
+    return first_lst, second_lst
+
+
+def find_mvs_model_class_by_name(model_name):
+    # Given the option --model [modelname],
+    # the file "models/modelname_model.py"
+    # will be imported.
+    model_filename = "mvs." + model_name + "_model"
+    modellib = importlib.import_module(model_filename)
+
+    # In the file, the class called ModelNameModel() will
+    # be instantiated. It has to be a subclass of BaseModel,
+    # and it is case-insensitive.
+    model = None
+    target_model_name = model_name.replace('_', '') + 'model'
+    for name, cls in modellib.__dict__.items():
+        if name.lower() == target_model_name.lower():
+            model = cls
+
+    if model is None:
+        print(
+            "In %s.py, there should be a subclass of BaseModel with class name that matches %s in lowercase."
+            % (model_filename, target_model_name))
+        exit(0)
+
+    return model
+
+
+def get_option_setter(model_name):
+    model_class = find_mvs_model_class_by_name(model_name)
+    return model_class.modify_commandline_options
+
+
+def create_mvs_model(args):
+    model = find_mvs_model_class_by_name(args.mvs_model)
+    instance = model(args)
+    print("model [{}] was created".format("mvs." + args.mvs_model + "_model"))
+    return instance

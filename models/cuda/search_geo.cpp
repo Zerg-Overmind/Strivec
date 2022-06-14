@@ -90,24 +90,23 @@ std::vector<torch::Tensor> sample_pts_on_rays_sphere_cvrg_cuda(
 std::vector<torch::Tensor> sample_2_sphere_tensoRF_cvrg_cuda(
         torch::Tensor xyz_sampled, torch::Tensor xyz_min, torch::Tensor xyz_max,
         torch::Tensor units, const float radiusl, const float radiush, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds,
-        torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_xyz);
-
+        torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_xyz, const int K, const bool KNN);
 
 std::vector<torch::Tensor> sample_2_tensoRF_cvrg_cuda(
         torch::Tensor xyz_sampled, torch::Tensor xyz_min, torch::Tensor xyz_max,
         torch::Tensor units, torch::Tensor local_range, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds,
-        torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_xyz_recenter, torch::Tensor geo_xyz);
+        torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_xyz_recenter, torch::Tensor geo_xyz, const int K, const bool KNN);
 
 std::vector<torch::Tensor> sample_2_rot_tensoRF_cvrg_cuda(
         torch::Tensor xyz_sampled, torch::Tensor xyz_min, torch::Tensor xyz_max,
         torch::Tensor units, torch::Tensor local_range, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds,
-        torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_rot, torch::Tensor geo_xyz);
+        torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_rot, torch::Tensor geo_xyz, const int K, const bool KNN);
 
 
 std::vector<torch::Tensor> sample_2_rotdist_tensoRF_cvrg_cuda(
         torch::Tensor xyz_sampled, torch::Tensor xyz_min, torch::Tensor xyz_max,
         torch::Tensor units, torch::Tensor local_range, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds,
-        torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_rot, torch::Tensor geo_xyz);
+        torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_rot, torch::Tensor geo_xyz, const int K, const bool KNN);
 
 std::vector<torch::Tensor> inds_cvrg_cuda(
         torch::Tensor xyz_sampled, torch::Tensor xyz_min, torch::Tensor xyz_max,
@@ -242,39 +241,39 @@ std::vector<torch::Tensor> sample_pts_on_rays_sphere_cvrg(
 }
 
 
-std::vector<torch::Tensor> sample_2_tensoRF_cvrg(torch::Tensor xyz_sampled, torch::Tensor xyz_min, torch::Tensor xyz_max, torch::Tensor units, torch::Tensor local_range, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds, torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_xyz_recenter, torch::Tensor geo_xyz) {
+std::vector<torch::Tensor> sample_2_tensoRF_cvrg(torch::Tensor xyz_sampled, torch::Tensor xyz_min, torch::Tensor xyz_max, torch::Tensor units, torch::Tensor local_range, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds, torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_xyz_recenter, torch::Tensor geo_xyz, const int K, const bool KNN) {
   CHECK_INPUT(xyz_sampled);
   CHECK_INPUT(geo_xyz_recenter);
   CHECK_INPUT(geo_xyz);
   assert(xyz_sampled.dim()==2);
-  return sample_2_tensoRF_cvrg_cuda(xyz_sampled, xyz_min, xyz_max, units, local_range, local_dims, tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx, geo_xyz_recenter, geo_xyz);
+  return sample_2_tensoRF_cvrg_cuda(xyz_sampled, xyz_min, xyz_max, units, local_range, local_dims, tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx, geo_xyz_recenter, geo_xyz, K, KNN);
 }
 
 
-std::vector<torch::Tensor> sample_2_rot_tensoRF_cvrg(torch::Tensor xyz_sampled, torch::Tensor xyz_min, torch::Tensor xyz_max, torch::Tensor units, torch::Tensor local_range, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds, torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_rot, torch::Tensor geo_xyz) {
+std::vector<torch::Tensor> sample_2_rot_tensoRF_cvrg(torch::Tensor xyz_sampled, torch::Tensor xyz_min, torch::Tensor xyz_max, torch::Tensor units, torch::Tensor local_range, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds, torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_rot, torch::Tensor geo_xyz, const int K, const bool KNN) {
   CHECK_INPUT(xyz_sampled);
   CHECK_INPUT(geo_xyz);
   CHECK_INPUT(geo_rot);
   assert(xyz_sampled.dim()==2);
-  return sample_2_rot_tensoRF_cvrg_cuda(xyz_sampled, xyz_min, xyz_max, units, local_range, local_dims, tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx, geo_rot, geo_xyz);
+  return sample_2_rot_tensoRF_cvrg_cuda(xyz_sampled, xyz_min, xyz_max, units, local_range, local_dims, tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx, geo_rot, geo_xyz, K, KNN);
 }
 
 
-std::vector<torch::Tensor> sample_2_rotdist_tensoRF_cvrg(torch::Tensor xyz_sampled, torch::Tensor xyz_min, torch::Tensor xyz_max, torch::Tensor units, torch::Tensor local_range, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds, torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_rot, torch::Tensor geo_xyz) {
+std::vector<torch::Tensor> sample_2_rotdist_tensoRF_cvrg(torch::Tensor xyz_sampled, torch::Tensor xyz_min, torch::Tensor xyz_max, torch::Tensor units, torch::Tensor local_range, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds, torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_rot, torch::Tensor geo_xyz, const int K, const bool KNN) {
   CHECK_INPUT(xyz_sampled);
   CHECK_INPUT(geo_xyz);
   CHECK_INPUT(geo_rot);
   assert(xyz_sampled.dim()==2);
-  return sample_2_rotdist_tensoRF_cvrg_cuda(xyz_sampled, xyz_min, xyz_max, units, local_range, local_dims, tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx, geo_rot, geo_xyz);
+  return sample_2_rotdist_tensoRF_cvrg_cuda(xyz_sampled, xyz_min, xyz_max, units, local_range, local_dims, tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx, geo_rot, geo_xyz, K, KNN);
 }
 
 
-std::vector<torch::Tensor> sample_2_sphere_tensoRF_cvrg(torch::Tensor xyz_sampled, torch::Tensor xyz_min, torch::Tensor xyz_max, torch::Tensor units, const float radiusl, const float radiush, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds, torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_xyz) {
+std::vector<torch::Tensor> sample_2_sphere_tensoRF_cvrg(torch::Tensor xyz_sampled, torch::Tensor xyz_min, torch::Tensor xyz_max, torch::Tensor units, const float radiusl, const float radiush, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds, torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_xyz, const int K, const bool KNN) {
   CHECK_INPUT(xyz_sampled);
   CHECK_INPUT(geo_xyz);
   assert(xyz_sampled.dim()==2);
   assert(tensoRF_topindx.dim()==2);
-  return sample_2_sphere_tensoRF_cvrg_cuda(xyz_sampled, xyz_min, xyz_max, units, radiusl, radiush, local_dims, tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx, geo_xyz);
+  return sample_2_sphere_tensoRF_cvrg_cuda(xyz_sampled, xyz_min, xyz_max, units, radiusl, radiush, local_dims, tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx, geo_xyz, K, KNN);
 }
 
 
