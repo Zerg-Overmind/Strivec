@@ -100,8 +100,11 @@ def reconstruction(args, geo):
 
     # init dataset
     dataset = dataset_dict[args.dataset_name]
-    train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False, rnd_ray=args.rnd_ray)
-    test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True)
+    train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False, rnd_ray=args.rnd_ray, args=args)
+    test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True, args=args)
+    if geo is None:
+        geo = [train_dataset.center[None, :]]
+
     white_bg = train_dataset.white_bg
     near_far = train_dataset.near_far
     ray_type = args.ray_type
@@ -119,7 +122,6 @@ def reconstruction(args, geo):
     os.makedirs(f'{logfolder}/imgs_vis', exist_ok=True)
     os.makedirs(f'{logfolder}/imgs_rgba', exist_ok=True)
     os.makedirs(f'{logfolder}/rgba', exist_ok=True)
-    summary_writer = SummaryWriter(logfolder)
 
     # init parameters
     # tensorVM, renderer = init_parameters(args, train_dataset.scene_bbox.to(device), reso_list[0])
@@ -199,7 +201,6 @@ def reconstruction(args, geo):
     tvreg = TVLoss()
     print(f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}")
 
-
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
 
     shrink_list = [update_AlphaMask_list[0]] if args.shrink_list is None else args.shrink_list
@@ -221,7 +222,7 @@ def reconstruction(args, geo):
             cur_rot_step = not cur_rot_step
             rot_step.pop(0)
             if not cur_rot_step:
-                draw_box(tensorf.pnt_xyz, tensorf.rot2m(tensorf.pnt_rot), args.local_range, logfolder, iteration)
+                draw_box(tensorf.pnt_xyz, args.local_range, logfolder, iteration, rot_m=tensorf.rot2m(tensorf.pnt_rot))
                 tensorf.max_tensoRF = args.max_tensoRF
                 tensorf.K_tensoRF = args.K_tensoRF
                 tensorf.KNN = args.KNN > 0
@@ -405,8 +406,7 @@ if __name__ == '__main__':
     np.random.seed(20211202)
     args = comp_revise(args)
 
-    geo = gen_geo(args)
-
+    geo = gen_geo(args) if args.use_geo > 0 else None
 
     if args.export_mesh:
         export_mesh(args, geo)

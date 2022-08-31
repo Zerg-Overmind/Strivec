@@ -10,6 +10,8 @@ def config_parser(cmd=None):
                         help='where to store ckpts and logs')
     parser.add_argument("--add_timestamp", type=int, default=0,
                         help='add timestamp to dir')
+    parser.add_argument("--use_geo", type=int, default=1,
+                        help='1 for geo, 0 for not using geo')
     parser.add_argument("--skip_zero_grad", type=int, default=0,
                         help='use masked adam for skip zero')
     parser.add_argument("--datadir", type=str, default='./data/llff/fern',
@@ -62,8 +64,6 @@ def config_parser(cmd=None):
     # local pointTensor
     parser.add_argument("--tensoRF_shape", type=str, default="cube", choices=['cube', 'sphere'])
 
-    parser.add_argument("--vox_center", type=int, default=0)
-
     parser.add_argument(
         '--vox_range',
         type=float,
@@ -107,13 +107,27 @@ def config_parser(cmd=None):
         default=0,
         help='final local dimension in each tensoRF'
     )
+
+    parser.add_argument(
+        '--vox_center',
+        type=int,
+        nargs='+',
+        default=(1),
+        help='final local dimension in each tensoRF'
+    )
     parser.add_argument("--rot_step", type=int, default=None, action="append")
-    parser.add_argument("--rnd_ray", type=int, default=0,
-                        help='input data directory')
+    parser.add_argument("--unit_lvl", type=int, default=0, help='which lvl we take grid unit')
+    parser.add_argument("--filterall", type=int, default=0, help='if only keep when all lvl covers or any lvl covers')
+    parser.add_argument("--rnd_ray", type=int, default=0, help='input data directory')
 
     parser.add_argument("--ji", type=int, default=0)
     parser.add_argument("--rot_KNN", type=int, default=None, help="if use KNN for sampling during rotation optimization")
     parser.add_argument("--KNN", type=int, default=1, help="if use KNN for sampling")
+    parser.add_argument("--margin", type=int, default=0, help="number of pixel on edge for scannet during train")
+    parser.add_argument("--test_margin", type=int, default=0, help="number of pixel on edge for scannet during test")
+    parser.add_argument("--radiance_add", type=int, default=0, help="1, add radiance feature; 0, cat radiance feature")
+    parser.add_argument("--rad_lvl_norm", type=int, default=0, help="1, normalize radiance by valid lvl")
+    parser.add_argument("--den_lvl_norm", type=int, default=0, help="1, normalize density by valid lvl")
     parser.add_argument(
         '--max_tensoRF',
         type=int,
@@ -144,7 +158,7 @@ def config_parser(cmd=None):
     parser.add_argument("--n_iters", type=int, default=30000)
 
     parser.add_argument('--dataset_name', type=str, default='blender',
-                        choices=['blender', 'llff', 'nsvf', 'dtu','tankstemple', 'own_data'])
+                        choices=['blender', 'llff', 'nsvf', 'dtu','tankstemple', 'TanksAndTempleBG', 'own_data', 'scannet'])
     parser.add_argument('--align_center', type=int, default=1)
     # parser.add_argument('--cal_mthd', type=str, default='drct', choices=['splat', 'drct'])
 

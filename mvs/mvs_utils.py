@@ -8,12 +8,101 @@ import torchvision.transforms as T
 from functools import partial
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
+from plyfile import PlyData, PlyElement
+from tqdm import tqdm
 
 # Misc
 img2mse = lambda x, y : torch.mean((x - y) ** 2)
 mse2psnr = lambda x : -10. * torch.log(x) / torch.log(torch.Tensor([10.]))
 to8b = lambda x : (255*np.clip(x,0,1)).astype(np.uint8)
 mse2psnr2 = lambda x : -10. * np.log(x) / np.log(10.)
+
+
+def load_ply_points(args):
+    if not os.path.exists(args.pointfile):
+        if not os.path.exists(args.pointfile):
+            parse_mesh(args)
+    plydata = PlyData.read(args.pointfile)
+    # plydata (PlyProperty('x', 'double'), PlyProperty('y', 'double'), PlyProperty('z', 'double'), PlyProperty('nx', 'double'), PlyProperty('ny', 'double'), PlyProperty('nz', 'double'), PlyProperty('red', 'uchar'), PlyProperty('green', 'uchar'), PlyProperty('blue', 'uchar'))
+    x,y,z=torch.as_tensor(plydata.elements[0].data["x"].astype(np.float32), device="cuda", dtype=torch.float32), torch.as_tensor(plydata.elements[0].data["y"].astype(np.float32), device="cuda", dtype=torch.float32), torch.as_tensor(plydata.elements[0].data["z"].astype(np.float32), device="cuda", dtype=torch.float32)
+    points_xyz = torch.stack([x,y,z], dim=-1)
+    if args.ranges[0] > -99.0:
+        ranges = torch.as_tensor(opt.ranges, device=points_xyz.device, dtype=torch.float32)
+        mask = torch.prod(torch.logical_and(points_xyz >= ranges[None, :3], points_xyz <= ranges[None, 3:]), dim=-1) > 0
+        points_xyz = points_xyz[mask]
+    # np.savetxt(os.path.join(self.data_dir, self.scan, "exported/pcd.txt"), points_xyz.cpu().numpy(), delimiter=";")
+    return points_xyz
+
+
+def parse_mesh(args):
+    points_path = os.path.join(args.datadir, "exported/pcd.ply")
+    mesh_path = os.path.join(args.datadir + "_vh_clean.ply")
+    plydata = PlyData.read(mesh_path)
+    print("plydata 0", plydata.elements[0], plydata.elements[0].data["blue"].dtype)
+
+    vertices = np.empty(len( plydata.elements[0].data["blue"]), dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
+    vertices['x'] = plydata.elements[0].data["x"].astype('f4')
+    vertices['y'] = plydata.elements[0].data["y"].astype('f4')
+    vertices['z'] = plydata.elements[0].data["z"].astype('f4')
+    vertices['red'] = plydata.elements[0].data["red"].astype('u1')
+    vertices['green'] = plydata.elements[0].data["green"].astype('u1')
+    vertices['blue'] = plydata.elements[0].data["blue"].astype('u1')
+
+    # save as ply
+    ply = PlyData([PlyElement.describe(vertices, 'vertex')], text=False)
+    ply.write(points_path)
+
+
+def read_depth(filepath):
+    depth_im = cv2.imread(filepath, -1).astype(np.float32)
+    depth_im /= 1000
+    depth_im[depth_im > 8.0] = 0
+    depth_im[depth_im < 0.3] = 0
+    return depth_im
+
+
+def filter_valid_id(args, id_list):
+    empty_lst=[]
+    for id in id_list:
+        c2w = np.loadtxt(os.path.join(args.datadir, "exported/pose", "{}.txt".format(id))).astype(np.float32)
+        if np.max(np.abs(c2w)) < 30:
+            empty_lst.append(id)
+    return empty_lst
+
+
+def load_init_depth_points(args, all_id_list, depth_intrinsic, device="cuda", vox_res=100):
+    py, px = torch.meshgrid(
+        torch.arange(0, 480, dtype=torch.float32, device=device),
+        torch.arange(0, 640, dtype=torch.float32, device=device))
+    # print("max py, px", torch.max(py), torch.max(px))
+    # print("min py, px", torch.min(py), torch.min(px))
+    img_xy = torch.stack([px, py], dim=-1) # [480, 640, 2]
+    # print(img_xy.shape, img_xy[:10])
+    reverse_intrin = torch.inverse(torch.as_tensor(depth_intrinsic)).t().to(device)
+    world_xyz_all = torch.zeros([0,3], device=device, dtype=torch.float32)
+    for i in tqdm(range(len(all_id_list)), desc=f'Loading depth {len(all_id_list)}'):
+        id = all_id_list[i]
+        c2w = torch.as_tensor(np.loadtxt(os.path.join(args.datadir, "exported/pose", "{}.txt".format(id))).astype(np.float32), device=device, dtype=torch.float32)  #@ self.blender2opencv
+        # 480, 640, 1
+        depth = torch.as_tensor(read_depth(os.path.join(args.datadir, "exported/depth/{}.png".format(id))), device=device)[..., None]
+        cam_xy =  img_xy * depth
+        cam_xyz = torch.cat([cam_xy, depth], dim=-1)
+        cam_xyz = cam_xyz @ reverse_intrin
+        cam_xyz = cam_xyz[cam_xyz[...,2] > 0,:]
+        cam_xyz = torch.cat([cam_xyz, torch.ones_like(cam_xyz[...,:1])], dim=-1)
+        world_xyz = (cam_xyz.view(-1,4) @ c2w.t())[...,:3]
+        # print("cam_xyz", torch.min(cam_xyz, dim=-2)[0], torch.max(cam_xyz, dim=-2)[0])
+        # print("world_xyz", world_xyz.shape) #, torch.min(world_xyz.view(-1,3), dim=-2)[0], torch.max(world_xyz.view(-1,3), dim=-2)[0])
+        if vox_res > 0:
+            world_xyz = construct_vox_points_xyz(world_xyz, vox_res)
+            # print("world_xyz", world_xyz.shape)
+        world_xyz_all = torch.cat([world_xyz_all, world_xyz], dim=0)
+    if args.ranges[0] > -99.0:
+        ranges = torch.as_tensor(args.ranges, device=world_xyz_all.device, dtype=torch.float32)
+        mask = torch.prod(torch.logical_and(world_xyz_all >= ranges[None, :3], world_xyz_all <= ranges[None, 3:]), dim=-1) > 0
+        world_xyz_all = world_xyz_all[mask]
+    return world_xyz_all
+
 
 def get_psnr(imgs_pred, imgs_gt):
     psnrs = []

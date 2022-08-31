@@ -200,7 +200,6 @@ class ScannetDataset(Dataset):
             self.all_rgbs = []
             self.all_masks = []
             self.all_depth = []
-            self.c2ws = []
 
             img_eval_interval = 1 if self.N_vis < 0 else len(self.meta['frames']) // self.N_vis
             idxs = list(range(0, len(self.id_list), img_eval_interval))
@@ -254,36 +253,6 @@ class ScannetDataset(Dataset):
         rays_o, rays_d = get_rays(self.directions, c2w)  # both (h*w, 3)
         return torch.cat([rays_o, rays_d], 1), img.reshape(self.img_wh[-1] - 2 * self.margin, self.img_wh[-2] - 2 * self.margin, 3)
 
-
-    def build_proj_mats(self, list=None, norm_w2c=None, norm_c2w=None):
-        proj_mats, intrinsics, world2cams, cam2worlds = [], [], [], []
-        list = self.id_list if list is None else list
-
-        focal = 0.5 * 800 / np.tan(0.5 * self.meta['camera_angle_x'])  # original focal length
-        focal *= self.img_wh[0] / 800  # modify focal length to match size self.img_wh
-        self.focal = focal
-        self.near_far = np.array([2.0, 6.0])
-        for vid in list:
-            frame = self.meta['frames'][vid]
-            c2w = np.array(frame['transform_matrix']) # @ self.blender2opencv
-            if norm_w2c is not None:
-                c2w = norm_w2c @ c2w
-            w2c = np.linalg.inv(c2w)
-            cam2worlds.append(c2w)
-            world2cams.append(w2c)
-
-            intrinsic = np.array([[focal, 0, self.width / 2], [0, focal, self.height / 2], [0, 0, 1]])
-            intrinsics.append(intrinsic.copy())
-
-            # multiply intrinsics and extrinsics to get projection matrix
-            proj_mat_l = np.eye(4)
-            intrinsic[:2] = intrinsic[:2] / 4
-            proj_mat_l[:3, :4] = intrinsic @ w2c[:3, :4]
-            proj_mats += [(proj_mat_l, self.near_far)]
-
-        proj_mats, intrinsics = np.stack(proj_mats), np.stack(intrinsics)
-        world2cams, cam2worlds = np.stack(world2cams), np.stack(cam2worlds)
-        return proj_mats, intrinsics, world2cams, cam2worlds
 
 
     def __len__(self):

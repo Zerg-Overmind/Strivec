@@ -1,4 +1,3 @@
-
 import os
 from tqdm.auto import tqdm
 from opt_adapt import config_parser
@@ -6,42 +5,21 @@ args = config_parser()
 print(args)
 os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu_ids
 from models.apparatus import *
-
-
-
-from recon_prior_hier import gen_geo
-
+from recon_prior_adapt import gen_geo
 import json, random
 from renderer import *
 from utils import *
 from torch.utils.tensorboard import SummaryWriter
 import datetime
-
 from dataLoader import dataset_dict
 import sys
-
 from models.masked_adam import MaskedAdam
-
+from models.init_net.run import get_density_pnts
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 renderer = OctreeRender_trilinear_fast
-
-
-class SimpleSampler:
-    def __init__(self, total, batch):
-        self.total = total
-        self.batch = batch
-        self.curr = total
-        self.ids = None
-
-    def nextids(self):
-        self.curr+=self.batch
-        if self.curr + self.batch > self.total:
-            self.ids = torch.LongTensor(np.random.permutation(self.total))
-            self.curr = 0
-        return self.ids[self.curr:self.curr+self.batch]
-
+from dataLoader.ray_utils import SimpleSampler
 
 @torch.no_grad()
 def export_mesh(args, geo):
@@ -58,10 +36,8 @@ def export_mesh(args, geo):
 
 
 @torch.no_grad()
-def render_test(args, geo):
+def render_test(args, geo, train_dataset, test_dataset):
     # init dataset
-    dataset = dataset_dict[args.dataset_name]
-    test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True)
     white_bg = test_dataset.white_bg
     ray_type = args.ray_type
 
@@ -95,15 +71,15 @@ def render_test(args, geo):
         evaluation_path(test_dataset,tensorf, c2ws, renderer, f'{logfolder}/{args.expname}/imgs_path_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ray_type=ray_type,device=device)
 
-def reconstruction(args, geo):
+def reconstruction(args, geo, train_dataset, test_dataset):
 
     # init dataset
-    dataset = dataset_dict[args.dataset_name]
-    train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False, rnd_ray=args.rnd_ray, args=args)
-    test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True, args=args)
-    if geo is None:
-        geo = [train_dataset.center[None, :]]
 
+    if geo is None:
+        if hasattr(train_dataset, "center"):
+            geo = [train_dataset.center.reshape(1,3)]
+        else:
+            geo = [torch.zeros([1,3], device="cuda", dtype=torch.float32)]
     white_bg = train_dataset.white_bg
     near_far = train_dataset.near_far
     ray_type = args.ray_type
@@ -209,7 +185,6 @@ def reconstruction(args, geo):
 
     adapt_lvl = 0
     for iteration in pbar:
-
         ray_idx = trainingSampler.nextids()
         rays_train, rgb_train, tensoRF_per_ray_train = allrays[ray_idx].to(device), allrgbs[ray_idx].to(device), None if tensoRF_per_ray is None else tensoRF_per_ray[ray_idx].to(device)
 
@@ -220,7 +195,7 @@ def reconstruction(args, geo):
             cur_rot_step = not cur_rot_step
             rot_step.pop(0)
             if not cur_rot_step:
-                draw_box(tensorf.pnt_xyz, tensorf.rot2m(tensorf.pnt_rot), args.local_range, logfolder, iteration)
+                draw_box(tensorf.pnt_xyz, args.local_range, logfolder, iteration, rot_m=tensorf.rot2m(tensorf.pnt_rot))
                 tensorf.max_tensoRF = args.max_tensoRF
                 tensorf.K_tensoRF = args.K_tensoRF
                 tensorf.KNN = args.KNN > 0
@@ -323,11 +298,9 @@ def reconstruction(args, geo):
             trainingSampler = SimpleSampler(allrgbs.shape[0], args.batch_size)
 
         if args.adapt_list is not None and iteration in args.adapt_list:
+            find_shadingloss(geo, train_dataset, allrays, allrgbs, tensorf, args, renderer, white_bg, ray_type, device, num_top_rays=args.top_rays[adapt_lvl])
+            # tensorf.adapt_add(adapt_lvl)
             adapt_lvl += 1
-            find_shadingloss(top_rays=)
-            rgb_map, weights, depth_map, rgbpers, ray_ids = renderer(rays_train, tensorf, chunk=args.batch_size, N_samples=-1, white_bg = white_bg, ray_type=ray_type, device=device, is_train=True, tensoRF_per_ray=tensoRF_per_ray_train, rot_step=cur_rot_step)
-
-            tensorf.adapt_add(adapt_lvl)
 
         if args.upsamp_list is not None and iteration in args.upsamp_list:
             local_dims = local_dim_list.pop(0)
@@ -402,7 +375,21 @@ def comp_revise(args):
 
 
 @torch.no_grad()
-def find_shadingloss(top_rays=1000):
+def find_shadingloss(geo, dataset, allrays, allrgbs, tensorf, args, renderer, white_bg, ray_type, device,
+                     num_top_rays=1000):
+    if num_top_rays == 0:
+        depth_xyz = den_eval(geo, dataset, tensorf, args, renderer, N_samples=-1,
+          white_bg=white_bg, ray_type=ray_type, device=device, den_thresh=0.7)
+    else:
+        PSNRs, depth_xyz = ray_evaluation(dataset, allrays, allrgbs, tensorf, args, renderer, N_samples=-1, white_bg=white_bg, ray_type=ray_type, device=device, worse_thresh=0.7)
+    smallest_PSNRs, smallest_inds = torch.topk(PSNRs, num_top_rays, dim=0, largest=False, sorted=False)
+    top_xyz = depth_xyz[smallest_inds, :]
+    print("top_xyz, smallest_PSNRs, smallest_inds", top_xyz.shape, smallest_PSNRs.shape, smallest_inds.shape)
+    np.savetxt("log/ship_adapt_full_0.4_0.2_0.1_2222/depth_xyz_top.txt", top_xyz.cpu().numpy(), delimiter=";")
+
+def vis_box(geo, args):
+    for l in range(len(geo)):
+        draw_box(geo[l][..., :3], args.local_range[l], f'{args.basedir}/{args.expname}', l)
 
 
 if __name__ == '__main__':
@@ -412,13 +399,22 @@ if __name__ == '__main__':
     np.random.seed(20211202)
     args = comp_revise(args)
 
-    geo = gen_geo(args) if args.use_geo > 0 else None
+    dataset = dataset_dict[args.dataset_name]
+    train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False,
+                            rnd_ray=args.rnd_ray, args=args)
+    test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True, args=args)
 
+    pnts = get_density_pnts(args, train_dataset) if args.use_geo < 0 else None # a quickly generate points by a dvgo
+    # coarse
+    # np.savetxt(os.path.dirname(args.ckpt), pnt.cpu().numpy(), delimiter=";")
+
+    geo = gen_geo(args, geo=pnts) if args.use_geo != 0 else None
+    vis_box(geo, args)
     if args.export_mesh:
         export_mesh(args, geo)
 
     if args.render_only and (args.render_test or args.render_path):
-        render_test(args, geo)
+        render_test(args, geo, train_dataset, test_dataset)
     else:
-        reconstruction(args, geo)
+        reconstruction(args, geo, train_dataset, test_dataset)
 

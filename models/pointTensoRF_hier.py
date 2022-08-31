@@ -41,14 +41,15 @@ class PointTensorBase_hier(TensorBase):
         self.vecMode = [2, 1, 0]
         self.init_svd_volume(local_dims, device)
         self.shadingMode, self.pos_pe, self.view_pe, self.fea_pe, self.featureC = shadingMode, pos_pe, view_pe, fea_pe, featureC
-        self.init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, device)
+        self.init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, device, app_dim=app_dim[0] if args.radiance_add > 0 else None)
 
     def update_stepSize(self, local_dims):
         print("aabb", self.aabb.view(-1))
         self.aabbSize = self.aabb[1] - self.aabb[0]
         self.invaabbSize = 2.0/self.aabbSize
         if self.args.tensoRF_shape == "cube":
-            self.units = (2 * self.local_range[0] / local_dims[0,:3])
+            self.lvl_units = [(2 * self.local_range[l] / local_dims[l,:3]) for l in range(self.lvl)]
+            self.units = self.lvl_units[self.args.unit_lvl]
             self.stepSize = torch.mean(self.units) * self.step_ratio
             print(torch.mean(self.units) , self.step_ratio)
             self.gridSize = torch.ceil(self.aabbSize / self.units).long().to(self.device)
@@ -116,17 +117,17 @@ class PointTensorBase_hier(TensorBase):
 
     def agg_tensoRF_at_samples(self, dist, agg_id, value, out=None, outweight=None):
         weights = self.agg_weight_func(dist)
-        weight_sum = torch.clamp(segment_coo(
+        weight_sum = segment_coo(
             src=weights,
             index=agg_id,
             out=outweight,
-            reduce='sum'), min=1)
+            reduce='sum')
         agg_value = segment_coo(
             src=weights * value,
             index=agg_id,
             out=out,
             reduce='sum')
-        return agg_value / weight_sum
+        return agg_value / torch.clamp(weight_sum, min=1), weight_sum > 0
 
     @torch.no_grad()
     def filtering_rays(self, all_rays, all_rgbs, N_samples=-1, chunk=10240 * 1, cvrg=True, bbox_only=False, apply_filter=True):
@@ -168,7 +169,6 @@ class PointTensorBase_hier(TensorBase):
                 mask_inrange = tensoRF_per_ray > 0
                 mask_filtered.append((mask_inbbox * mask_inrange).cpu())
                 tensoRF_per_ray_lst.append(tensoRF_per_ray.cpu())
-
         mask_filtered = torch.cat(mask_filtered).view(all_rays.shape[:-1])
         tensoRF_per_ray = torch.cat(tensoRF_per_ray_lst).view(all_rays.shape[:-1]) if len(tensoRF_per_ray_lst) > 0 else None
 
@@ -191,7 +191,8 @@ class PointTensorBase_hier(TensorBase):
         alpha = F.max_pool3d(alpha, kernel_size=ks, padding=ks // 2, stride=1).view((gridSize[2], gridSize[1], gridSize[0])) #.view(gridSize[::-1])
         alpha[alpha >= self.alphaMask_thres] = 1
         alpha[alpha < self.alphaMask_thres] = 0
-
+        # alpha = alpha.to(torch.bool)
+        # print("alpha size!!!!!!!!!!!!!!!!!!!!!!!", alpha.element_size() * alpha.nelement())
         self.alphaMask = AlphaGridMask(self.device, self.aabb, alpha, mask_cache_thres=self.alphaMask_thres)
 
         valid_xyz = dense_xyz[alpha > 0.5]
@@ -244,7 +245,7 @@ class PointTensorBase_hier(TensorBase):
 
     def create_sample_map(self):
         print("start create mapping")
-        self.tensoRF_cvrg_inds, self.tensoRF_count, self.tensoRF_topindx, self.geo_xyz_recenter = [], [], [], []
+        self.tensoRF_cvrg_inds, self.tensoRF_count, self.tensoRF_topindx = [], [], []
         for l in range(self.lvl):
             if self.args.tensoRF_shape == "cube":
                 if self.args.rot_init is None:
@@ -255,10 +256,12 @@ class PointTensorBase_hier(TensorBase):
                     #     torch::Tensor units,
                     #     torch::Tensor local_range,
                     #     torch::Tensor local_dims, const int max_tensoRF
-                    tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx, geo_xyz_recenter = search_geo_cuda.build_tensoRF_map(self.pnt_xyz[l], self.gridSize, self.aabb[0], self.aabb[1], self.units, self.local_range[l], self.local_dims[l], self.max_tensoRF[l])
-                    geo_xyz_recenter = self.pnt_xyz[l] if self.args.align_center == 0 else geo_xyz_recenter.contiguous()
-                    self.geo_xyz_recenter.append(geo_xyz_recenter)
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx = search_geo_hier_cuda.build_tensoRF_map_hier(self.pnt_xyz[l], self.gridSize, self.aabb[0], self.aabb[1], self.units, self.local_range[l], self.local_dims[l], self.max_tensoRF[l])
                 else:
+                    print("no implementation")
+                    exit()
                     tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx = search_geo_cuda.build_sphere_tensoRF_map(self.pnt_xyz[l], self.gridSize, self.aabb[0], self.aabb[1], self.units, 0.0, self.radius[l], self.local_dims[l, :3], self.max_tensoRF[l])
             elif self.args.tensoRF_shape == "sphere":
                 print("no implementation")
@@ -268,8 +271,12 @@ class PointTensorBase_hier(TensorBase):
             self.tensoRF_cvrg_inds.append(tensoRF_cvrg_inds)
             self.tensoRF_count.append(tensoRF_count)
             self.tensoRF_topindx.append(tensoRF_topindx)
-
-        self.tensoRF_cvrg_filter = torch.any(torch.stack(self.tensoRF_cvrg_inds, dim=-1) >= 0, dim=-1).contiguous() if len(self.tensoRF_cvrg_inds) > 0 else (self.tensoRF_cvrg_inds[0] >= 0).contiguous()
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        if self.args.filterall == 0:
+            self.tensoRF_cvrg_filter = torch.any(torch.stack(self.tensoRF_cvrg_inds, dim=-1) >= 0, dim=-1).contiguous() if len(self.tensoRF_cvrg_inds) > 0 else (self.tensoRF_cvrg_inds[0] >= 0).contiguous()
+        else:
+            self.tensoRF_cvrg_filter = torch.all(torch.stack(self.tensoRF_cvrg_inds, dim=-1) >= 0, dim=-1).contiguous() if len(self.tensoRF_cvrg_inds) > 0 else (self.tensoRF_cvrg_inds[0] >= 0).contiguous()
         # self.cvrg_inds_center2pnts(self.tensoRF_cvrg_inds)
         # print("tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx, max_tensoRF_count", self.tensoRF_cvrg_inds.shape, self.tensoRF_count.shape, self.tensoRF_topindx.shape, torch.max(self.tensoRF_count))
         # print("tensoRF_cvrg_inds", self.tensoRF_cvrg_inds.numel(), torch.max(self.tensoRF_cvrg_inds), torch.sum(self.tensoRF_cvrg_inds >= 0), self.tensoRF_count.shape, self.tensoRF_topindx.shape)
@@ -413,7 +420,7 @@ class PointTensorBase_hier(TensorBase):
                 #     local_gweight_s = 1 - local_gweight_l
                 #     mask = None
                 # else:
-                local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id = search_geo_cuda.sample_2_tensoRF_cvrg(xyz_sampled.contiguous(), self.aabb[0], self.aabb[1], self.units, self.local_range[l], self.local_dims[l,:3], self.tensoRF_cvrg_inds[l], self.tensoRF_count[l], self.tensoRF_topindx[l], self.geo_xyz_recenter[l], self.pnt_xyz[l], self.K_tensoRF[l], self.KNN)
+                local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id = search_geo_hier_cuda.sample_2_tensoRF_cvrg_hier(xyz_sampled.contiguous(), self.aabb[0], self.aabb[1], self.units, self.lvl_units[l], self.local_range[l], self.local_dims[l,:3], self.tensoRF_cvrg_inds[l], self.tensoRF_count[l], self.tensoRF_topindx[l], self.pnt_xyz[l], self.K_tensoRF[l], self.KNN)
             elif self.args.tensoRF_shape == "sphere":
                 print("no implementation")
                 exit()
@@ -432,7 +439,7 @@ class PointTensorBase_hier(TensorBase):
 
 
     def inds_cvrg(self, xyz_sampled):
-        global_gindx, local_gindx, tensoRF_id = search_geo_cuda.inds_cvrg(xyz_sampled.contiguous(), self.aabb[0], self.aabb[1], self.units, self.local_range, self.local_dims[:3], self.tensoRF_cvrg_inds, self.tensoRF_count, self.tensoRF_topindx, self.geo_xyz_recenter, self.pnt_xyz)
+        global_gindx, local_gindx, tensoRF_id = search_geo_cuda.inds_cvrg(xyz_sampled.contiguous(), self.aabb[0], self.aabb[1], self.units, self.local_range, self.local_dims[:3], self.tensoRF_cvrg_inds, self.tensoRF_count, self.tensoRF_topindx, self.pnt_xyz)
         return global_gindx, local_gindx, tensoRF_id
 
 
@@ -459,7 +466,8 @@ class PointTensorBase_hier(TensorBase):
 
 
 
-    def forward(self, rays_chunk, white_bg=True, is_train=False, ray_type=0, N_samples=-1, return_depth=0, tensoRF_per_ray=None, eval=False, rot_step=False):
+    def forward(self, rays_chunk, white_bg=True, is_train=False, ray_type=0, N_samples=-1, return_depth=0,
+                tensoRF_per_ray=None, eval=False, rot_step=False, depth_bg=True):
 
         # sample points
         viewdirs = rays_chunk[:, 3:6]
@@ -541,7 +549,7 @@ class PointTensorBase_hier(TensorBase):
                     index=ray_id,
                     out=torch.zeros([N, 1], device=weights.device, dtype=torch.float32),
                     reduce='sum')[..., 0]
-                depth_map = depth_map + bg_weight * rays_chunk[..., -1]
+                depth_map += (bg_weight * 1000) if depth_bg else 0
         else:
             depth_map = None
         rgb_map = rgb_map.clamp(0, 1)
@@ -615,7 +623,7 @@ class PointTensorCP_hier(PointTensorBase_hier):
         if self.args.rot_init is not None and init:
             self.pnt_rot = torch.nn.ParameterList([torch.nn.Parameter(torch.as_tensor(self.args.rot_init, device="cuda", dtype=torch.float32).repeat(len(geo), 1), requires_grad=self.args.rotgrad>0) for geo in self.geo]).to(device)
 
-        self.basis_mat = torch.nn.ModuleList([torch.nn.Linear(self.app_n_comp[l][0], self.app_dim[l], bias=False).to(device) for l in range(self.lvl)]).to(device)
+        self.basis_mat = torch.nn.ModuleList([torch.nn.Linear(self.app_n_comp[l][0], self.app_dim[l], bias=False).to(device) for l in range(len(self.app_dim))]).to(device)
 
 
     def init_angle_svd(self, n_component, local_dim, dimpos, scale, device, lvl):
@@ -742,30 +750,38 @@ class PointTensorCP_hier(PointTensorBase_hier):
         sigma_feature_acc = torch.zeros([sample_num], device=local_gindx_s[0].device, dtype=torch.float32)
         # print("self.density_line", len(self.density_line), len(self.density_line[0]))
         # print("self.density_line shape", self.density_line[0][0].shape, torch.max(self.density_line[0][0]))
+        num_lvl_exist = torch.zeros([sample_num, 1], device="cuda", dtype=torch.float32)
         for l in range(self.lvl):
             if len(local_gindx_s[l]) > 0:
                 sigma_feature = torch.sum(self.ind_intrp_line_map_batch_prod(self.vecMode, self.density_line[3*l:3*l+3], local_gindx_s[l], local_gindx_l[l], local_gweight_s[l], local_gweight_l[l], tensoRF_id[l]), dim=1, keepdim=True)
-                sigma_feature = self.agg_tensoRF_at_samples(local_kernel_dist[l], agg_id[l], sigma_feature, out=torch.zeros([sample_num, 1], device=local_gindx_s[l].device, dtype=torch.float32), outweight=torch.zeros([sample_num, 1], device=local_gindx_s[l].device, dtype=torch.float32)).squeeze(-1)
-                sigma_feature_acc += sigma_feature
-        return sigma_feature_acc
+                sigma_feature, has_tensorf = self.agg_tensoRF_at_samples(local_kernel_dist[l], agg_id[l], sigma_feature, out=torch.zeros([sample_num, 1], device=local_gindx_s[l].device, dtype=torch.float32), outweight=torch.zeros([sample_num, 1], device=local_gindx_s[l].device, dtype=torch.float32))
+                if self.args.den_lvl_norm:
+                    num_lvl_exist += has_tensorf
+                sigma_feature_acc += sigma_feature.squeeze(-1)
+        return sigma_feature_acc / torch.clamp(num_lvl_exist, min=1).squeeze(-1)
 
 
     def compute_appfeature_geo(self, local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id, sample_num=None, dir_gindx_s=None, dir_gindx_l=None, dir_gweight_l=None):
         # plane + line basis
         # line_coef_point = torch.prod(self.ind_intrp_line_map_batch(self.vecMode, self.app_line, local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, tensoRF_id), dim=-1)
-        infeat = torch.zeros([sample_num, 0], device=local_gindx_s[0].device, dtype=torch.float32)
+        infeat = torch.zeros([sample_num, 0 if self.args.radiance_add == 0 else self.app_dim[0]], device=local_gindx_s[0].device, dtype=torch.float32)
+        num_lvl_exist = torch.zeros([sample_num, 1], device="cuda", dtype=torch.float32)
         for l in range(self.lvl):
             if len(local_gindx_s[l]) > 0:
                 line_coef_point = self.ind_intrp_line_map_batch_prod(self.vecMode, self.app_line[3*l:3*l+3], local_gindx_s[l], local_gindx_l[l], local_gweight_s[l], local_gweight_l[l], tensoRF_id[l])
-
-                app_feat = self.agg_tensoRF_at_samples(local_kernel_dist[l], agg_id[l], line_coef_point, out=torch.zeros([sample_num, self.app_n_comp[l][0]], device=local_gindx_s[l].device, dtype=torch.float32), outweight=torch.zeros([sample_num, 1], device=local_gindx_s[l].device, dtype=torch.float32))
+                app_feat, has_tensorf = self.agg_tensoRF_at_samples(local_kernel_dist[l], agg_id[l], line_coef_point, out=torch.zeros([sample_num, self.app_n_comp[l][0]], device=local_gindx_s[l].device, dtype=torch.float32), outweight=torch.zeros([sample_num, 1], device=local_gindx_s[l].device, dtype=torch.float32))
                 if dir_gindx_s is not None:
                     print("not implemented")
                     exit()
-                infeat = torch.cat([infeat, self.basis_mat[l](app_feat)], dim=-1)
+                if self.args.radiance_add == 0:
+                    infeat = torch.cat([infeat, self.basis_mat[l](app_feat)], dim=-1)
+                else:
+                    infeat += self.basis_mat[l](app_feat)
+                    if self.args.rad_lvl_norm:
+                        num_lvl_exist += has_tensorf
             else:
-                infeat = torch.cat([infeat, torch.zeros([sample_num, self.app_dim[l]], device=infeat.device, dtype=torch.float32)], dim=-1)
-        return infeat
+                infeat = torch.cat([infeat, torch.zeros([sample_num, self.app_dim[l]], device=infeat.device, dtype=torch.float32)], dim=-1) if self.args.radiance_add == 0 else infeat
+        return infeat / torch.clamp(num_lvl_exist, min=1)
 
 
     def density_L1(self):

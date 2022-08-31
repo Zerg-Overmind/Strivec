@@ -101,8 +101,8 @@ def reconstruction(args, geo):
 
     # init dataset
     dataset = dataset_dict[args.dataset_name]
-    train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False, rnd_ray=args.rnd_ray)
-    test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True)
+    train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False, rnd_ray=args.rnd_ray, args=args)
+    test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True, args=args)
     white_bg = train_dataset.white_bg
     near_far = train_dataset.near_far
     ray_type = args.ray_type
@@ -122,7 +122,6 @@ def reconstruction(args, geo):
     os.makedirs(f'{logfolder}/imgs_vis', exist_ok=True)
     os.makedirs(f'{logfolder}/imgs_rgba', exist_ok=True)
     os.makedirs(f'{logfolder}/rgba', exist_ok=True)
-    summary_writer = SummaryWriter(logfolder)
 
     # init parameters
     # tensorVM, renderer = init_parameters(args, train_dataset.scene_bbox.to(device), reso_list[0])
@@ -217,10 +216,11 @@ def reconstruction(args, geo):
             rays_train, rgb_train = randomize_ray(rays_train[:,:3], rgb_train, allalpha[ray_idx].to(device), allijs[ray_idx].to(device), allc2ws[ray_idx].to(device), train_dataset.focal, train_dataset.cent)
         #rgb_map, alphas_map, depth_map, weights, uncertainty
         if args.rotgrad > 0 and rot_step is not None and iteration in rot_step:
+            draw_box(tensorf.pnt_xyz, args.local_range, logfolder, iteration, rot_m=tensorf.rot2m(tensorf.pnt_rot))
             cur_rot_step = not cur_rot_step
             rot_step.pop(0)
             if not cur_rot_step:
-                draw_box(tensorf.pnt_xyz, tensorf.rot2m(tensorf.pnt_rot), args.local_range, logfolder, iteration)
+                # draw_box(tensorf.pnt_xyz, tensorf.rot2m(tensorf.pnt_rot), args.local_range, logfolder, iteration)
                 tensorf.max_tensoRF = args.max_tensoRF
                 tensorf.K_tensoRF = args.K_tensoRF
                 tensorf.KNN = args.KNN > 0

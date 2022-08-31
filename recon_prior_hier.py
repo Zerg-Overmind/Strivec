@@ -19,7 +19,21 @@ def load(pointfile):
         return None
 
 def gen_geo(args):
-    geo = load(args.pointfile)
+    if args.pointfile.endswith('ply'):
+        # points_path = os.path.join(self.root_dir, "exported/pcd.ply")
+        geo = mvs_utils.load_ply_points(args)
+    elif args.pointfile == 'depth':
+        colordir = os.path.join(args.datadir, "exported/color")
+        image_paths = [f for f in os.listdir(colordir) if os.path.isfile(os.path.join(colordir, f))]
+        image_paths = [os.path.join(args.datadir, "exported/color/{}.jpg".format(i)) for i in
+                            range(len(image_paths))]
+        all_id_list = mvs_utils.filter_valid_id(args, list(range(len(image_paths))))
+        depth_intrinsic = np.loadtxt(
+            os.path.join(args.datadir, "exported/intrinsic/intrinsic_depth.txt")).astype(np.float32)[:3, :3]
+        geo = mvs_utils.load_init_depth_points(args, all_id_list, depth_intrinsic, device="cuda")
+        # np.savetxt(os.path.join(args.basedir, args.expname, "depth.txt"), geo.cpu().numpy(), delimiter=";")
+    else:
+        geo = load(args.pointfile)
     if geo is None:
         print("Do MVS to create pointfile at ", args.pointfile)
         dataset = mvs_dataset_dict[args.dataset_name]
@@ -35,7 +49,7 @@ def gen_geo(args):
     if args.vox_range is not None and not args.pointfile[:-4].endswith("vox"):
         geo_xyz, confidence = geo[..., :3], geo[..., -1:]
         for i in range(len(args.vox_range)):
-            geo_lvl = mvs_utils.construct_voxrange_points_mean(geo_xyz, torch.as_tensor(args.vox_range[i], dtype=torch.float32, device=geo.device), vox_center=args.vox_center>0)
+            geo_lvl = mvs_utils.construct_voxrange_points_mean(geo_xyz, torch.as_tensor(args.vox_range[i], dtype=torch.float32, device=geo.device), vox_center=args.vox_center[i]>0)
             print("after vox geo shape", geo_lvl.shape)
             np.savetxt(args.pointfile[:-4] + "_{}_vox".format(args.vox_range[i][0]) + ".txt", geo_lvl.cpu().numpy(), delimiter=";")
             geo_lst.append(geo_lvl.cuda())
@@ -49,6 +63,8 @@ def gen_geo(args):
                 np.savetxt(args.pointfile[:-4]+"_{}".format(args.fps_num)+".txt", geo_lvl.cpu().numpy(), delimiter=";")
                 geo_lst[i] = geo_lvl.cuda()
     return geo_lst
+
+
 
 def gen_points_filter(dataset, args, model):
     cam_xyz_all = []

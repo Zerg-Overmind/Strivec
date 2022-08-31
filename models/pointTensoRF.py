@@ -428,7 +428,8 @@ class PointTensorBase(TensorBase):
 
 
 
-    def forward(self, rays_chunk, white_bg=True, is_train=False, ray_type=0, N_samples=-1, return_depth=0, tensoRF_per_ray=None, eval=False, rot_step=False):
+    def forward(self, rays_chunk, white_bg=True, is_train=False, ray_type=0, N_samples=-1, return_depth=0,
+                tensoRF_per_ray=None, eval=False, rot_step=False, depth_bg=True):
 
         # sample points
         viewdirs = rays_chunk[:, 3:6]
@@ -503,7 +504,7 @@ class PointTensorBase(TensorBase):
                     index=ray_id,
                     out=torch.zeros([N, 1], device=weights.device, dtype=torch.float32),
                     reduce='sum')[..., 0]
-                depth_map = depth_map + bg_weight * rays_chunk[..., -1]
+                depth_map += (bg_weight * 1000) if depth_bg else 0
         else:
             depth_map = None
         rgb_map = rgb_map.clamp(0, 1)

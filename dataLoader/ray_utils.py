@@ -5,6 +5,19 @@ from kornia import create_meshgrid
 
 
 # from utils import index_point_feature
+class SimpleSampler:
+    def __init__(self, total, batch):
+        self.total = total
+        self.batch = batch
+        self.curr = total
+        self.ids = None
+
+    def nextids(self):
+        self.curr+=self.batch
+        if self.curr + self.batch > self.total:
+            self.ids = torch.LongTensor(np.random.permutation(self.total))
+            self.curr = 0
+        return self.ids[self.curr:self.curr+self.batch]
 
 def depth2dist(z_vals, cos_angle):
     # z_vals: [N_ray N_sample]
@@ -39,7 +52,7 @@ def get_ray_directions(H, W, focal, center=None):
     cent = center if center is not None else [W / 2, H / 2]
     directions = torch.stack([(i - cent[0]) / focal[0], (j - cent[1]) / focal[1], torch.ones_like(i)], -1)  # (H, W, 3)
 
-    return directions
+    return directions, torch.stack([i,j], dim=-1)
 
 
 def get_ray_directions_blender(H, W, focal, center=None):

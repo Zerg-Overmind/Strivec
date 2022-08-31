@@ -11,12 +11,12 @@ def config_parser(cmd=None):
     parser.add_argument("--add_timestamp", type=int, default=0,
                         help='add timestamp to dir')
     parser.add_argument("--use_geo", type=int, default=1,
-                        help='1 for geo, 0 for not using geo')
+                        help='1 for geo, 0 for not using geo, -1 for vox estimation')
     parser.add_argument("--skip_zero_grad", type=int, default=0,
                         help='use masked adam for skip zero')
     parser.add_argument("--datadir", type=str, default='./data/llff/fern',
                         help='input data directory')
-    parser.add_argument("--pointfile", type=str, default='./data/llff/fern',
+    parser.add_argument("--pointfile", type=str, default='./log/den_prefix',
                         help='input data directory')
     parser.add_argument("--pretrained_mvs_ckpt", type=str, default="/home/xharlie/user_space/codes/MVSNet/model_000014.ckpt",
                         help='checkpoints of the pretrained_mvs network')
@@ -27,7 +27,8 @@ def config_parser(cmd=None):
     parser.add_argument('--downsample_train', type=float, default=1.0)
     parser.add_argument('--downsample_test', type=float, default=1.0)
     parser.add_argument('--model_name', type=str, default='PointTensorCP',
-                        choices=['PointTensorCP', 'PointTensorCP_hier','PointTensorCPB' ,'PointTensorCPD', 'PointTensorVMSplit'])
+                        choices=['PointTensorCP', 'PointTensorCP_hier', 'PointTensorCP_adapt', 'PointTensorCPB' ,
+                                 'PointTensorCPD', 'PointTensorVMSplit'])
     parser.add_argument('--gpu_ids',
                         type=str,
                         default='0',
@@ -95,6 +96,37 @@ def config_parser(cmd=None):
     )
 
     parser.add_argument(
+        '--adapt_local_range',
+        type=float,
+        nargs='+',
+        default=(0.1, 0.1, 0.1),
+        help='local point tensor half range'
+    )
+    parser.add_argument(
+        '--adapt_dims_init',
+        type=int,
+        nargs='+',
+        default=(10, 10, 10),
+        help='initial local dimension in each tensoRF'
+    )
+
+    parser.add_argument(
+        '--adapt_dims_final',
+        type=int,
+        nargs='+',
+        default=(20, 20, 20),
+        help='final local dimension in each tensoRF'
+    )
+
+    parser.add_argument(
+        '--adapt_dims_trend',
+        type=int,
+        nargs='+',
+        default=(20, 20, 20),
+        help='final local dimension in each tensoRF'
+    )
+
+    parser.add_argument(
         '--rot_init',
         type=float,
         nargs='+',
@@ -115,6 +147,7 @@ def config_parser(cmd=None):
         default=(1),
         help='final local dimension in each tensoRF'
     )
+
     parser.add_argument("--rot_step", type=int, default=None, action="append")
     parser.add_argument("--unit_lvl", type=int, default=0, help='which lvl we take grid unit')
     parser.add_argument("--filterall", type=int, default=0, help='if only keep when all lvl covers or any lvl covers')
@@ -245,8 +278,6 @@ def config_parser(cmd=None):
     parser.add_argument("--white_bkgd", action='store_true',
                         help='set to render synthetic data on a white bkgd (always use for dvoxels)')
 
-
-
     parser.add_argument("--upsamp_list", type=int, action="append", default=None)
     parser.add_argument("--top_rays", type=int, action="append", default=None)
     parser.add_argument("--adapt_list", type=int, action="append")
@@ -264,7 +295,32 @@ def config_parser(cmd=None):
                         help='N images to vis')
     parser.add_argument("--vis_every", type=int, default=10000,
                         help='frequency of visualize the image')
+
+    parser.add_argument("--world_bound_scale", type=float, default=1.0,
+                        help='scale up the bbox of scene')
+
+    parser.add_argument("--pre_num_voxels", type=int, default=1024000, help='N images to vis')
+    parser.add_argument("--pre_batch_size", type=int, default=8192, help='N images to vis')
+    parser.add_argument("--pervoxel_lr", type=int, default=1, help='view-count-based lr')
+    parser.add_argument("--pre_maskout_near_cam_vox", type=int, default=1, help='maskout grid points that between cameras and their near planes')
+    parser.add_argument("--pre_N_iters", type=int, default=5000, help='in pre den, number of optimization steps')
+    parser.add_argument("--pre_alpha_init", type=float, default=1e-6, help='set the alpha values everywhere at the begin of training')
+    parser.add_argument("--pre_lrate_decay", type=int, default=20, help='lr decay by 0.1 after every lrate_decay*1000 steps')
+    parser.add_argument("--pre_lrate_density", type=float, default=1e-1, help='lr of density voxel grid')
+    parser.add_argument("--pre_lrate_k0", type=float, default=1e-1, help='lr of color/feature voxel grid')
+    parser.add_argument("--decay_after_scale", type=float, default=1.0, help='decay act_shift after scaling')
+    parser.add_argument("--pre_weight_entropy_last", type=float, default=0.01, help='decay act_shift after scaling')
+    parser.add_argument("--pre_weight_rgbper", type=float, default=0.1, help='weight of per-point rgb loss')
+    parser.add_argument("--pre_maskout_lt_nviews", type=int, default=0, help='N images to vis')
+    parser.add_argument(
+        '--pre_pg_scale',
+        type=int,
+        nargs='+',
+        default=[],
+        help='steps for progressive scaling'
+    )
     if cmd is not None:
         return parser.parse_args(cmd)
     else:
         return parser.parse_args()
+

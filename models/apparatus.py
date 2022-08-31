@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 import time
 import os
+# from torch_scatter import segment_coo
 from torch_scatter import segment_coo
 from torch.utils.cpp_extension import load
 from plyfile import PlyData, PlyElement
@@ -25,13 +26,13 @@ search_geo_cuda = load(
         for path in ['cuda/search_geo.cpp', 'cuda/search_geo.cu']],
     verbose=True)
 
-#
-# search_geo_hier_cuda = load(
-#     name='search_geo_hier_cuda',
-#     sources=[
-#         os.path.join(parent_dir, path)
-#         for path in ['cuda/search_geo_hier.cpp', 'cuda/search_geo_hier.cu']],
-#     verbose=True)
+
+search_geo_hier_cuda = load(
+    name='search_geo_hier_cuda',
+    sources=[
+        os.path.join(parent_dir, path)
+        for path in ['cuda/search_geo_hier.cpp', 'cuda/search_geo_hier.cu']],
+    verbose=True)
 
 
 def positional_encoding(positions, freqs):
@@ -102,8 +103,7 @@ class AlphaGridMask(torch.nn.Module):
         self.aabbSize = self.aabb[1] - self.aabb[0]
         self.invgridSize = 1.0 / self.aabbSize * 2
         self.alpha_volume = alpha_volume.view(1, 1, *alpha_volume.shape[-3:])
-        self.gridSize = torch.LongTensor([alpha_volume.shape[-1], alpha_volume.shape[-2], alpha_volume.shape[-3]]).to(
-            self.device)
+        self.gridSize = torch.LongTensor([alpha_volume.shape[-1], alpha_volume.shape[-2], alpha_volume.shape[-3]]).to(self.device)
         # mask = (self.alpha_volume >= mask_cache_thres).squeeze(0).squeeze(0)
         # self.register_buffer('mask', mask)
         # self.register_buffer('xyz2ijk_scale', (self.gridSize - 1) / self.aabbSize)
@@ -200,7 +200,7 @@ class MLPRender(torch.nn.Module):
         return rgb
 
 
-def draw_box(center_xyz, rot_m, local_range, log, step):
+def draw_box(center_xyz, local_range, log, step, rot_m=None):
     sx, sy, sz = local_range[0], local_range[1], local_range[2]
     shift = torch.as_tensor([[sx, sy, sz],
                              [-sx, sy, sz],
@@ -211,7 +211,8 @@ def draw_box(center_xyz, rot_m, local_range, log, step):
                              [-sx, sy, -sz],
                              [-sx, -sy, -sz],
                              ], dtype=center_xyz.dtype, device=center_xyz.device)[None, ...]
-    corner_xyz = center_xyz[..., None, :] + torch.matmul(shift, rot_m)
+    corner_xyz = center_xyz[..., None, :] + (torch.matmul(shift, rot_m) if rot_m is not None else shift)
+
     corner_xyz = corner_xyz.cpu().detach().numpy().reshape(-1, 3)
 
     vertex = np.array([(corner_xyz[i,0], corner_xyz[i,1], corner_xyz[i,2]) for i in range(len(corner_xyz))],
@@ -300,6 +301,17 @@ def raw2alpha_only(sigma, dist):
     alpha = 1. - torch.exp(-sigma*dist)
     return alpha
 
+def grid_xyz(center, local_range, local_dims):
+    xs = torch.linspace(center[0]-local_range[0], center[0]+local_range[0], steps=local_dims[0]+1,
+                        device=local_range.device,  dtype=local_range.dtype)
+    ys = torch.linspace(center[1]-local_range[1], center[1]+local_range[1], steps=local_dims[1]+1,
+                        device=local_range.device,  dtype=local_range.dtype)
+    zs = torch.linspace(center[2]-local_range[2], center[2]+local_range[2], steps=local_dims[2]+1,
+                        device=local_range.device,  dtype=local_range.dtype)
+    xx = xs.view(-1, 1, 1).repeat(1, len(ys), len(zs))
+    yy = ys.view(1, -1, 1).repeat(len(xs), 1, len(zs))
+    zz = zs.view(1, 1, -1).repeat(len(xs), len(ys), 1)
+    return torch.stack([xx, yy, zz], dim=-1).reshape(-1, 3)
 
 class Alphas2Weights(torch.autograd.Function):
     @staticmethod

@@ -86,24 +86,23 @@ def gen_path(pos_gen, at=(0, 0, 0), up=(0, -1, 0), frames=180):
 
 class TanksTempleDatasetBG(Dataset):
     """NSVF Generic Dataset."""
-    def __init__(self, datadir, split='train', downsample=1.0, wh=[1920,1080], is_stack=False):
+    def __init__(self, datadir, split='train', downsample=1.0, is_stack=False, rnd_ray=None, args=None):
         self.root_dir = datadir
+        self.args = args
         self.split = split
         self.is_stack = is_stack
         self.downsample = downsample
-        self.img_wh = (int(wh[0]/downsample),int(wh[1]/downsample))
-        self.define_transforms()
-
         self.white_bg = True
-        self.near_far = [0.01,6.0]
-        self.scene_bbox = torch.from_numpy(np.loadtxt(f'{self.root_dir}/bbox.txt')).float()[:6].view(2,3)*1.2
+        self.near_far = [0.01, 6.0]
+        # self.scene_bbox = torch.from_numpy(np.loadtxt(f'{self.root_dir}/bbox.txt')).float()[:6].view(2, 3) * 1.2
 
         self.blender2opencv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+        self.define_transforms()
         self.read_meta()
-        self.define_proj_mat()
-        
-        self.center = torch.mean(self.scene_bbox, axis=0).float().view(1, 1, 3)
-        self.radius = (self.scene_bbox[1] - self.center).float().view(1, 1, 3)
+        # self.define_proj_mat()
+        #
+        # self.center = torch.mean(self.scene_bbox, axis=0).float().view(1, 1, 3)
+        # self.radius = (self.scene_bbox[1] - self.center).float().view(1, 1, 3)
     
     def bbox2corners(self):
         corners = self.scene_bbox.unsqueeze(0).repeat(4,1,1)
@@ -115,7 +114,6 @@ class TanksTempleDatasetBG(Dataset):
     def read_meta(self):
 
         self.intrinsics = np.loadtxt(os.path.join(self.root_dir, "intrinsics.txt"))
-        self.intrinsics[:2] *= (np.array(self.img_wh)/np.array([1920,1080])).reshape(2,1)
         pose_files = sorted(os.listdir(os.path.join(self.root_dir, 'pose')))
         img_files  = sorted(os.listdir(os.path.join(self.root_dir, 'rgb')))
 
@@ -134,8 +132,12 @@ class TanksTempleDatasetBG(Dataset):
             pose_files = test_pose_files
             img_files = test_img_files
 
+        img = Image.open(os.path.join(self.root_dir, 'rgb', img_files[0]))
+        ori_img_shape = list(self.transform(img).shape)
+        self.img_wh = [ori_img_shape[2], ori_img_shape[1]]
         # ray directions for all pixels, same for all images (same H, W, focal)
-        self.directions = get_ray_directions(self.img_wh[1], self.img_wh[0], [self.intrinsics[0,0],self.intrinsics[1,1]], center=self.intrinsics[:2,2])  # (h, w, 3)
+        self.directions, _ = get_ray_directions(self.img_wh[1], self.img_wh[0], [self.intrinsics[0,0],self.intrinsics[1,1]], center=self.intrinsics[:2,2])  # (h, w, 3)
+
         self.directions = self.directions / torch.norm(self.directions, dim=-1, keepdim=True)
 
         self.poses = []
@@ -150,12 +152,9 @@ class TanksTempleDatasetBG(Dataset):
                 img = img.resize(self.img_wh, Image.LANCZOS)
             img = self.transform(img)  # (4, h, w)
             img = img.view(img.shape[0], -1).permute(1, 0)  # (h*w, 4) RGBA
-            if img.shape[-1]==4:
-                img = img[:, :3] * img[:, -1:] + (1 - img[:, -1:])  # blend A to RGB
             self.all_rgbs.append(img)
-            
 
-            c2w = np.loadtxt(os.path.join(self.root_dir, 'pose', pose_fname))# @ cam_trans
+            c2w = np.loadtxt(os.path.join(self.root_dir, 'pose', pose_fname)).reshape(4, 4) # @ cam_trans
             c2w = torch.FloatTensor(c2w)
             self.poses.append(c2w)  # C2W
             rays_o, rays_d = get_rays(self.directions, c2w)  # both (h*w, 3)
@@ -163,12 +162,12 @@ class TanksTempleDatasetBG(Dataset):
 
         self.poses = torch.stack(self.poses)
 
-        center = torch.mean(self.scene_bbox, dim=0)
-        radius = torch.norm(self.scene_bbox[1]-center)*1.2
+        self.center, self.radius = self.find_bbox()
+        self.scene_bbox = torch.stack([self.center - self.radius, self.center + self.radius], dim=0)
         up = torch.mean(self.poses[:, :3, 1], dim=0).tolist()
-        pos_gen = circle(radius=radius, h=-0.2*up[1], axis='y')
+        pos_gen = circle(radius=self.radius, h=-0.2*up[1], axis='y')
         self.render_path = gen_path(pos_gen, up=up,frames=200)
-        self.render_path[:, :3, 3] += center
+        self.render_path[:, :3, 3] += self.center
 
         if 'train' == self.split:
             if self.is_stack:
@@ -181,6 +180,21 @@ class TanksTempleDatasetBG(Dataset):
             self.all_rays = torch.stack(self.all_rays, 0)  # (len(self.meta['frames]),h*w, 3)
             self.all_rgbs = torch.stack(self.all_rgbs, 0).reshape(-1,*self.img_wh[::-1], 3)  # (len(self.meta['frames]),h,w,3)
 
+    def find_bbox(self):
+        bbox_path = os.path.join(self.root_dir, "bbox.txt")
+        data_bbox_scale = 1.1
+        if os.path.exists(bbox_path):
+            bbox_data = np.loadtxt(bbox_path)
+            center = (bbox_data[:3] + bbox_data[3:6]) * 0.5
+            radius = (bbox_data[3:6] - bbox_data[:3]) * 0.5 * data_bbox_scale
+        else:
+            # T, sscale = similarity_from_cameras(norm_poses)
+            center = torch.mean(self.poses[:, :3, 3], axis=0)
+            pose_norm = torch.norm(self.poses[:, :3, 3] - center, dim=-1)
+            radius = torch.median(pose_norm) * data_bbox_scale
+            print("min radius", torch.min(pose_norm))
+            print("max radius", torch.max(pose_norm))
+        return center, radius
  
     def define_transforms(self):
         self.transform = T.ToTensor()
@@ -211,3 +225,59 @@ class TanksTempleDatasetBG(Dataset):
             sample = {'rays': rays,
                       'rgbs': img}
         return sample
+
+
+    def similarity_from_cameras(self, c2w):
+        """
+        Get a similarity transform to normalize dataset
+        from c2w (OpenCV convention) cameras
+        :param c2w: (N, 4)
+        :return T (4,4) , scale (float)
+        """
+        t = c2w[:, :3, 3]
+        R = c2w[:, :3, :3]
+
+        # (1) Rotate the world so that z+ is the up axis
+        # we estimate the up axis by averaging the camera up axes
+        ups = np.sum(R * np.array([0, -1.0, 0]), axis=-1)
+        world_up = np.mean(ups, axis=0)
+        world_up /= np.linalg.norm(world_up)
+
+        up_camspace = np.array([0.0, -1.0, 0.0])
+        c = (up_camspace * world_up).sum()
+        cross = np.cross(world_up, up_camspace)
+        skew = np.array([[0.0, -cross[2], cross[1]],
+                         [cross[2], 0.0, -cross[0]],
+                         [-cross[1], cross[0], 0.0]])
+        if c > -1:
+            R_align = np.eye(3) + skew + (skew @ skew) * 1 / (1+c)
+        else:
+            # In the unlikely case the original data has y+ up axis,
+            # rotate 180-deg about x axis
+            R_align = np.array([[-1.0, 0.0, 0.0],
+                                [0.0, 1.0, 0.0],
+                                [0.0, 0.0, 1.0]])
+
+
+        #  R_align = np.eye(3) # DEBUG
+        R = (R_align @ R)
+        fwds = np.sum(R * np.array([0, 0.0, 1.0]), axis=-1)
+        t = (R_align @ t[..., None])[..., 0]
+
+        # (2) Recenter the scene using camera center rays
+        # find the closest point to the origin for each camera's center ray
+        nearest = t + (fwds * -t).sum(-1)[:, None] * fwds
+
+        # median for more robustness
+        translate = -np.median(nearest, axis=0)
+
+        #  translate = -np.mean(t, axis=0)  # DEBUG
+
+        transform = np.eye(4)
+        transform[:3, 3] = translate
+        transform[:3, :3] = R_align
+
+        # (3) Rescale the scene using camera distances
+        radius = np.median(np.linalg.norm(t + translate, axis=-1)) * 1.2
+        bbox = [-radius, -radius, -radius, radius, radius, radius]
+        return bbox
