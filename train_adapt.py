@@ -99,7 +99,6 @@ def reconstruction(args, geo, train_dataset, test_dataset):
     os.makedirs(f'{logfolder}/rgba', exist_ok=True)
 
     # init parameters
-    # tensorVM, renderer = init_parameters(args, train_dataset.scene_bbox.to(device), reso_list[0])
     aabb = train_dataset.scene_bbox.to(device)
     if args.ckpt is not None:
         ckpt = torch.load(args.ckpt, map_location=device)
@@ -116,6 +115,8 @@ def reconstruction(args, geo, train_dataset, test_dataset):
             fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
             fea2denseAct=args.fea2denseAct, local_dims=args.local_dims_init, geo=geo, args=args)
 
+    # init grad, optimizer and lr
+
     skip_zero_grad = args.skip_zero_grad
     grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis, skip_zero_grad = skip_zero_grad > 0)
     if args.lr_decay_iters > 0:
@@ -127,10 +128,13 @@ def reconstruction(args, geo, train_dataset, test_dataset):
     print("lr decay", args.lr_decay_target_ratio, args.lr_decay_iters)
     
     optimizer = MaskedAdam(grad_vars, betas=(0.9,0.99)) if skip_zero_grad else torch.optim.Adam(grad_vars, betas=(0.9,0.99))
+
+    # TODO optimize rotation with gradients
     if args.rotgrad > 0:
-        geo_optimizer = torch.optim.Adam(tensorf.get_geoparam_groups(args.lr_geo_init), betas=(0.9, 0.99))
+        geo_optimizer = torch.optim.Adam(tensorf.get_geoparam_groups(args.lr_geo_init), betas=(0.9, 0.99)) # to optimize rotation with gradient
 
     dim_lst = []
+
     # set upsample voxel dims
     if args.local_dims_trend is not None:
         assert args.upsamp_list is not None and len(args.upsamp_list) == len(args.local_dims_trend[0]), "args.local_dims_trend and args.upsamp_list mismatch "
@@ -153,9 +157,11 @@ def reconstruction(args, geo, train_dataset, test_dataset):
     torch.cuda.empty_cache()
     PSNRs,PSNRs_test = [],[0]
 
+    # gather rays
+
     allrays, allrgbs = train_dataset.all_rays, train_dataset.all_rgbs
 
-    if args.ray_type != 1:
+    if args.ray_type != 1: # if inward facing
         mask_filtered, tensoRF_per_ray = tensorf.filtering_rays(allrays, allrgbs, bbox_only=True)
         allrays, allrgbs = allrays[mask_filtered], allrgbs[mask_filtered]
         if args.rnd_ray > 0:
@@ -164,6 +170,7 @@ def reconstruction(args, geo, train_dataset, test_dataset):
             allc2ws = train_dataset.c2ws[mask_filtered]
     trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
 
+    # set loss for tensor constraint
     Ortho_reg_weight = args.Ortho_weight
     print("initial Ortho_reg_weight", Ortho_reg_weight)
 
@@ -176,6 +183,7 @@ def reconstruction(args, geo, train_dataset, test_dataset):
 
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
 
+    # set up epoch for shrink, alphamask, upsample
     shrink_list = [update_AlphaMask_list[0]] if args.shrink_list is None else args.shrink_list
     filter_ray_list = [update_AlphaMask_list[1]] if args.filter_ray_list is None else args.filter_ray_list
     new_aabb = None
@@ -188,9 +196,7 @@ def reconstruction(args, geo, train_dataset, test_dataset):
         ray_idx = trainingSampler.nextids()
         rays_train, rgb_train, tensoRF_per_ray_train = allrays[ray_idx].to(device), allrgbs[ray_idx].to(device), None if tensoRF_per_ray is None else tensoRF_per_ray[ray_idx].to(device)
 
-        if args.rnd_ray > 0:
-            rays_train, rgb_train = randomize_ray(rays_train[:,:3], rgb_train, allalpha[ray_idx].to(device), allijs[ray_idx].to(device), allc2ws[ray_idx].to(device), train_dataset.focal, train_dataset.cent)
-        #rgb_map, alphas_map, depth_map, weights, uncertainty
+        # TODO if use gradients to optimze rotation
         if args.rotgrad > 0 and rot_step is not None and iteration in rot_step:
             cur_rot_step = not cur_rot_step
             rot_step.pop(0)
@@ -206,6 +212,7 @@ def reconstruction(args, geo, train_dataset, test_dataset):
             tensorf.K_tensoRF = tensorf.max_tensoRF if tensorf.K_tensoRF is None else tensorf.K_tensoRF
             print("rot_step switch to ", cur_rot_step, "; KNN:", tensorf.KNN > 0, ";Query", tensorf.K_tensoRF, "/", tensorf.max_tensoRF)
 
+        # intput ray and do ray marching: get rgb_map, alphas_map, depth_map, weights, uncertainty
         rgb_map, weights, depth_map, rgbpers, ray_ids = renderer(rays_train, tensorf, chunk=args.batch_size, N_samples=-1, white_bg = white_bg, ray_type=ray_type, device=device, is_train=True, tensoRF_per_ray=tensoRF_per_ray_train, rot_step=cur_rot_step)
 
         loss = torch.mean((rgb_map - rgb_train) ** 2)
@@ -269,13 +276,13 @@ def reconstruction(args, geo, train_dataset, test_dataset):
             )
             PSNRs = []
 
-
+        # visualize every $vis_every iters
         if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
             # test_dataset
             PSNRs_test = evaluation(test_dataset, tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis, prtx=f'{iteration:06d}_', N_samples=-1, white_bg = white_bg, ray_type=ray_type, compute_extra_metrics=False)
             # summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
 
-
+        # update alpha mask -> shrink scene box -> filter rays -> adaptive -> upsample tensorf grid ->
         if update_AlphaMask_list is not None and iteration in update_AlphaMask_list:
             new_aabb = tensorf.updateAlphaMask()
 
@@ -297,6 +304,7 @@ def reconstruction(args, geo, train_dataset, test_dataset):
 
             trainingSampler = SimpleSampler(allrgbs.shape[0], args.batch_size)
 
+        # TODO adaptively adding new tensoRF
         if args.adapt_list is not None and iteration in args.adapt_list:
             find_shadingloss(geo, train_dataset, allrays, allrgbs, tensorf, args, renderer, white_bg, ray_type, device, num_top_rays=args.top_rays[adapt_lvl])
             # tensorf.adapt_add(adapt_lvl)
@@ -305,7 +313,6 @@ def reconstruction(args, geo, train_dataset, test_dataset):
         if args.upsamp_list is not None and iteration in args.upsamp_list:
             local_dims = local_dim_list.pop(0)
             reset = upsamp_reset_list.pop(0) > 0
-
             tensorf.upsample_volume_grid(local_dims, reset_feat=reset)
 
             if args.lr_upsample_reset:
@@ -315,11 +322,13 @@ def reconstruction(args, geo, train_dataset, test_dataset):
                 lr_scale = args.lr_decay_target_ratio ** (iteration / args.n_iters)
             grad_vars = tensorf.get_optparam_groups(args.lr_init*lr_scale, args.lr_basis*lr_scale, skip_zero_grad = skip_zero_grad > 0)
             optimizer = MaskedAdam(grad_vars, betas=(0.9,0.99)) if skip_zero_grad else torch.optim.Adam(grad_vars, betas=(0.9,0.99))
+
+            # TODO use grads to optimize tensorf rotation
             if args.rotgrad > 0:
                 geo_optimizer = torch.optim.Adam(tensorf.get_geoparam_groups(args.lr_geo_init * lr_scale), betas=(0.9,0.99), weight_decay=0.0)
     tensorf.save(f'{logfolder}/{args.expname}.th')
 
-
+    # test after training
     if args.render_train:
         os.makedirs(f'{logfolder}/imgs_train_all', exist_ok=True)
         train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=True)
@@ -338,6 +347,7 @@ def reconstruction(args, geo, train_dataset, test_dataset):
         print('========>',c2ws.shape)
         os.makedirs(f'{logfolder}/imgs_path_all', exist_ok=True)
         evaluation_path(test_dataset, tensorf, c2ws, renderer, f'{logfolder}/imgs_path_all/', N_vis=-1, N_samples=-1, white_bg = white_bg, ray_type=ray_type,device=device)
+        
 
 def add_dim(obj, times, div=False):
     if obj is None:
@@ -397,7 +407,7 @@ if __name__ == '__main__':
     torch.set_default_dtype(torch.float32)
     torch.manual_seed(20211202)
     np.random.seed(20211202)
-    args = comp_revise(args)
+    args = comp_revise(args) # change some config array to nested array, etc.
 
     dataset = dataset_dict[args.dataset_name]
     train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False,
@@ -408,13 +418,13 @@ if __name__ == '__main__':
     # coarse
     # np.savetxt(os.path.dirname(args.ckpt), pnt.cpu().numpy(), delimiter=";")
 
-    geo = gen_geo(args, geo=pnts) if args.use_geo != 0 else None
-    vis_box(geo, args)
+    geo = gen_geo(args, geo=pnts) if args.use_geo != 0 else None # generate tensoRFs' position (xyz)
+    vis_box(geo, args) # visualize tensoRF as rectangle boxes, able to rotate
     if args.export_mesh:
         export_mesh(args, geo)
 
     if args.render_only and (args.render_test or args.render_path):
-        render_test(args, geo, train_dataset, test_dataset)
+        render_test(args, geo, train_dataset, test_dataset) # run test
     else:
-        reconstruction(args, geo, train_dataset, test_dataset)
+        reconstruction(args, geo, train_dataset, test_dataset) # run train and test in the end
 
