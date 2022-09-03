@@ -24,8 +24,8 @@ def config_parser(cmd=None):
                         help='how many iterations to show psnrs or iters')
 
     parser.add_argument('--with_depth', action='store_true')
-    parser.add_argument('--downsample_train', type=float, default=1.0)
-    parser.add_argument('--downsample_test', type=float, default=1.0)
+    parser.add_argument('--downsample_train', type=float, default=1.0, help="downsample image size")
+    parser.add_argument('--downsample_test', type=float, default=1.0, help="downsample image size")
     parser.add_argument('--model_name', type=str, default='PointTensorCP',
                         choices=['PointTensorCP', 'PointTensorCP_hier', 'PointTensorCP_adapt', 'PointTensorCPB' ,
                                  'PointTensorCPD', 'PointTensorVMSplit'])
@@ -35,7 +35,7 @@ def config_parser(cmd=None):
                         help='gpu ids: e.g. 0  0,1,2, 0,2. use -1 for CPU')
     # mvs options
     parser.add_argument('--mvs_model', type=str, default='mvs_points',
-                        choices=['mvs_points'])
+                        choices=['mvs_points'], help="which mvs model to use for intial geometry reconstruction")
     parser.add_argument("--depth_conf_thresh", type=float, default=0.8,
                         help='thresholds for depth merge')
     parser.add_argument("--geo_cnsst_num", type=int, default=0,
@@ -49,35 +49,35 @@ def config_parser(cmd=None):
         type=float,
         nargs='+',
         default=(-100.0, -100.0, -100.0, 100.0, 100.0, 100.0),
-        help='vscale is the block size that store several voxels'
+        help='spatial ranges of initial geometry, we filter out initial points out side of ranges'
     )
     parser.add_argument("--vox_res", type=int, default=0,
-                        help='resolution of voxlization to filter points')
+                        help='resolution of voxlization to filter initial points')
     parser.add_argument(
         '--fps_num',
         type=int,
         nargs='+',
         default=None,
-        help='final local dimension in each tensoRF'
+        help='filter initial points to fps_num points by fps sampling'
     )
-    parser.add_argument("--shp_rand", type=float, default=0)
+    parser.add_argument("--shp_rand", type=float, default=0, help="randomply sample shading points along each ray")
 
     # local pointTensor
-    parser.add_argument("--tensoRF_shape", type=str, default="cube", choices=['cube', 'sphere'])
+    parser.add_argument("--tensoRF_shape", type=str, default="cube", choices=['cube', 'sphere'], help="the shape of each tensoRF")
 
     parser.add_argument(
         '--vox_range',
         type=float,
         nargs='+',
         default=None,
-        help='local point tensor half range'
+        help='to determine the center of tensoRF, we voxelize the space by vox_range and locate voxel having inital points'
     )
     parser.add_argument(
         '--local_range',
         type=float,
         nargs='+',
         default=(0.1, 0.1, 0.1),
-        help='local point tensor half range'
+        help='local tensoRF half range'
     )
     parser.add_argument(
         '--local_dims_init',
@@ -94,20 +94,36 @@ def config_parser(cmd=None):
         default=(20, 20, 20),
         help='final local dimension in each tensoRF'
     )
+    parser.add_argument(
+        '--rot_init',
+        type=float,
+        nargs='+',
+        default=None,
+        help='initial local dimension in each tensoRF during rotation'
+    )
+    parser.add_argument(
+        '--rotgrad',
+        type=int,
+        default=0,
+        help='if use gradient to rotate'
+    )
+
+    parser.add_argument("--local_dims_trend", type=int, default=None, action="append",
+                        help="target tensoRF voxel dims for each upsampling step")
 
     parser.add_argument(
         '--adapt_local_range',
         type=float,
         nargs='+',
         default=(0.1, 0.1, 0.1),
-        help='local point tensor half range'
+        help='adaptive local point tensor half range'
     )
     parser.add_argument(
         '--adapt_dims_init',
         type=int,
         nargs='+',
         default=(10, 10, 10),
-        help='initial local dimension in each tensoRF'
+        help='adaptive tensoRF initial local dimension in each tensoRF'
     )
 
     parser.add_argument(
@@ -115,7 +131,7 @@ def config_parser(cmd=None):
         type=int,
         nargs='+',
         default=(20, 20, 20),
-        help='final local dimension in each tensoRF'
+        help='adaptive tensoRF final local dimension in each tensoRF'
     )
 
     parser.add_argument(
@@ -123,21 +139,7 @@ def config_parser(cmd=None):
         type=int,
         nargs='+',
         default=(20, 20, 20),
-        help='final local dimension in each tensoRF'
-    )
-
-    parser.add_argument(
-        '--rot_init',
-        type=float,
-        nargs='+',
-        default=None,
-        help='final local dimension in each tensoRF'
-    )
-    parser.add_argument(
-        '--rotgrad',
-        type=int,
-        default=0,
-        help='final local dimension in each tensoRF'
+        help='target adaptive tensoRF dims for each upsampling step'
     )
 
     parser.add_argument(
@@ -145,50 +147,48 @@ def config_parser(cmd=None):
         type=int,
         nargs='+',
         default=(1),
-        help='final local dimension in each tensoRF'
+        help='put tensoRF at the center of occupied voxel or centroid of points in the occupied voxel'
     )
-
     parser.add_argument("--rot_step", type=int, default=None, action="append")
     parser.add_argument("--unit_lvl", type=int, default=0, help='which lvl we take grid unit')
-    parser.add_argument("--filterall", type=int, default=0, help='if only keep when all lvl covers or any lvl covers')
-    parser.add_argument("--rnd_ray", type=int, default=0, help='input data directory')
+    parser.add_argument("--filterall", type=int, default=0, help='if only compute shading when all lvl tensoRF covers or any lvl tensoRF covers')
 
-    parser.add_argument("--ji", type=int, default=0)
-    parser.add_argument("--rot_KNN", type=int, default=None, help="if use KNN for sampling during rotation optimization")
     parser.add_argument("--KNN", type=int, default=1, help="if use KNN for sampling")
-    parser.add_argument("--margin", type=int, default=0, help="number of pixel on edge for scannet during train")
-    parser.add_argument("--test_margin", type=int, default=0, help="number of pixel on edge for scannet during test")
+    parser.add_argument("--rot_KNN", type=int, default=None, help="if use KNN for sampling during rotation optimization")
+
+    parser.add_argument("--margin", type=int, default=0, help="exclude number of pixel on edge for scannet during train, due to cam distortion")
+    parser.add_argument("--test_margin", type=int, default=0, help="number of pixel on edge for scannet during test, due to cam distortion")
     parser.add_argument("--radiance_add", type=int, default=0, help="1, add radiance feature; 0, cat radiance feature")
-    parser.add_argument("--rad_lvl_norm", type=int, default=0, help="1, normalize radiance by valid lvl")
-    parser.add_argument("--den_lvl_norm", type=int, default=0, help="1, normalize density by valid lvl")
+    parser.add_argument("--rad_lvl_norm", type=int, default=0, help="1, normalize radiance by num of valid lvls")
+    parser.add_argument("--den_lvl_norm", type=int, default=0, help="1, normalize density by  num of valid lvls")
     parser.add_argument(
         '--max_tensoRF',
         type=int,
         nargs='+',
         default=[4],
-        help='final local dimension in each tensoRF'
+        help='max queried nearby tensoRFs for each shading point'
     )
     parser.add_argument(
         '--rot_max_tensoRF',
         type=int,
         nargs='+',
         default=None,
-        help='final local dimension in each tensoRF'
+        help='max queried nearby tensoRFs for each shading point during rotation optimization'
     )
     parser.add_argument(
         '--K_tensoRF',
         type=int,
         nargs='+',
         default=None,
-        help='final local dimension in each tensoRF'
+        help='among max_tensoRF tensoRF, resample a subset of K_tensoRF tensoRFs'
     )
+    parser.add_argument("--rot_K_tensoRF", type=int, default=None, help='during rotation optimization, among rot_max_tensoRF tensoRF, resample a subset of rot K_tensoRF tensoRFs')
 
-    parser.add_argument("--rot_K_tensoRF", type=int, default=None)
-    parser.add_argument("--intrp_mthd", type=str, default="linear", choices=['linear', 'avg', 'quadric'])
+    parser.add_argument("--intrp_mthd", type=str, default="linear", choices=['linear', 'avg', 'quadric'], help="how to blend features from each queried tensoRFs")
 
     # loader options
     parser.add_argument("--batch_size", type=int, default=4096)
-    parser.add_argument("--n_iters", type=int, default=30000)
+    parser.add_argument("--n_iters", type=int, default=30000, help="total training iters")
 
     parser.add_argument('--dataset_name', type=str, default='blender',
                         choices=['blender', 'llff', 'nsvf', 'dtu','tankstemple', 'TanksAndTempleBG', 'own_data', 'scannet'])
@@ -200,9 +200,9 @@ def config_parser(cmd=None):
     parser.add_argument("--lr_geo_init", type=float, default=0.03,
                         help='learning rate of tensorf geo parameter')
     parser.add_argument("--lr_init", type=float, default=0.02,
-                        help='learning rate')    
+                        help='inital learning rate of xyz tensoRF features')
     parser.add_argument("--lr_basis", type=float, default=1e-3,
-                        help='learning rate')
+                        help='inital learning rate of network')
     parser.add_argument("--lr_decay_iters", type=int, default=-1,
                         help = 'number of iterations the lr will decay to the target ratio; -1 will set it to n_iters')
     parser.add_argument("--lr_decay_target_ratio", type=float, default=0.1,
@@ -212,30 +212,31 @@ def config_parser(cmd=None):
 
     # loss
     parser.add_argument("--L1_weight_inital", type=float, default=0.0,
-                        help='loss weight')
+                        help='before shrink scene box, l1 loss weight on tensoRF features')
     parser.add_argument("--L1_weight_rest", type=float, default=0,
-                        help='loss weight')
+                        help='after shrink scene box, l1 loss weight on tensoRF features ')
     parser.add_argument("--Ortho_weight", type=float, default=0.0,
-                        help='loss weight')
+                        help='tensoRF orthorgonal loss weight')
     parser.add_argument("--TV_weight_density", type=float, default=0.0,
-                        help='loss weight')
+                        help='TV density loss weight')
     parser.add_argument("--TV_weight_app", type=float, default=0.0,
-                        help='loss weight')
+                        help='TV appearance loss weight')
     parser.add_argument("--weight_rgbper", type=float, default=0.0,
-                        help='loss weight')
+                        help='rbg per shading points before ray marching, loss weight')
     
     # model
     # volume options
-    parser.add_argument("--n_lamb_sigma", type=int, action="append")
-    parser.add_argument("--n_lamb_sh", type=int, action="append")
-    parser.add_argument("--data_dim_color", type=int, nargs='+', default=(27))
+    parser.add_argument("--n_lamb_sigma", type=int, action="append",
+                        help='num. density components in each tensoRF')
+    parser.add_argument("--n_lamb_sh", type=int, action="append",
+                        help='num. radiance color components in each tensoRF')
+    parser.add_argument("--data_dim_color", type=int, nargs='+', default=(27),
+                        help='num. feature components in each tensoRF')
 
-    parser.add_argument("--rm_weight_mask_thre", type=float, default=0.0001,
-                        help='mask points in ray marching')
     parser.add_argument("--alpha_mask_thre", type=float, default=0.0001,
                         help='threshold for creating alpha mask volume')
     parser.add_argument("--distance_scale", type=float, default=25,
-                        help='scaling sampling distance for computation')
+                        help='scaling sampling distance for computation in Raw2Alpha')
     parser.add_argument("--density_shift", type=float, default=-10,
                         help='shift density in softplus; making density = 0  when feature == 0')
                         
@@ -264,28 +265,25 @@ def config_parser(cmd=None):
     # rendering options
     parser.add_argument('--lindisp', default=False, action="store_true",
                         help='use disparity depth sampling')
-    parser.add_argument("--perturb", type=float, default=1.,
-                        help='set to 0. for no jitter, 1. for jitter')
-    parser.add_argument("--accumulate_decay", type=float, default=0.998)
-    parser.add_argument("--fea2denseAct", type=str, default='softplus')
+    parser.add_argument("--fea2denseAct", type=str, default='softplus', help="activation function in feature2density")
     parser.add_argument('--ray_type', type=int, default=0, help="0 for torch linear, 1 for torch ndc, -1 for cuda linear")
     parser.add_argument('--nSamples', type=int, default=1e6,
                         help='sample point each ray, pass 1e6 if automatic adjust')
-    parser.add_argument('--step_ratio',type=float,default=0.5)
+    parser.add_argument('--step_ratio',type=float,default=0.5, help="shading point sampling interval ration w.r.t. global voxel edge length")
 
 
     ## blender flags
     parser.add_argument("--white_bkgd", action='store_true',
                         help='set to render synthetic data on a white bkgd (always use for dvoxels)')
 
-    parser.add_argument("--upsamp_list", type=int, action="append", default=None)
-    parser.add_argument("--top_rays", type=int, action="append", default=None)
-    parser.add_argument("--adapt_list", type=int, action="append")
-    parser.add_argument("--upsamp_reset_list", type=int, default=None, action="append")
-    parser.add_argument("--shrink_list", type=int, default=None, action="append")
-    parser.add_argument("--local_dims_trend", type=int, default=None, action="append")
-    parser.add_argument("--filter_ray_list", type=int, default=None, action="append")
-    parser.add_argument("--update_AlphaMask_list", type=int, action="append")
+    parser.add_argument("--upsamp_list", type=int, action="append", default=None, help="list of iterations to  upsample voxel dims")
+    parser.add_argument("--top_rays", type=int, action="append", default=None, help="add new adaptive tensoRF to num. top_rays which has highest rendering loss")
+    parser.add_argument("--adapt_list", type=int, action="append" , help="list of iterations to add new adaptive tensoRF at regions with high rendering loss")
+    parser.add_argument("--upsamp_reset_list", type=int, default=None, action="append", help="list of iterations to reset lr after upsample the tensoRF dims")
+    parser.add_argument("--shrink_list", type=int, default=None, action="append", help="list of iterations to shrink the scene box")
+
+    parser.add_argument("--filter_ray_list", type=int, default=None, action="append", help="list of iterations to filter the ray that has no cross to object")
+    parser.add_argument("--update_AlphaMask_list", type=int, action="append", help="list of iterations to udate alpha mask to skip computation of shading")
 
     parser.add_argument('--idx_view',
                         type=int,
@@ -299,8 +297,10 @@ def config_parser(cmd=None):
     parser.add_argument("--world_bound_scale", type=float, default=1.0,
                         help='scale up the bbox of scene')
 
-    parser.add_argument("--pre_num_voxels", type=int, default=1024000, help='N images to vis')
-    parser.add_argument("--pre_batch_size", type=int, default=8192, help='N images to vis')
+    ########################## args for dvgo initialization ##########################
+
+    parser.add_argument("--pre_num_voxels", type=int, default=1024000, help='N num voxel in dvgo initialization')
+    parser.add_argument("--pre_batch_size", type=int, default=8192, help='batch size in dvgo initialization')
     parser.add_argument("--pervoxel_lr", type=int, default=1, help='view-count-based lr')
     parser.add_argument("--pre_maskout_near_cam_vox", type=int, default=1, help='maskout grid points that between cameras and their near planes')
     parser.add_argument("--pre_N_iters", type=int, default=5000, help='in pre den, number of optimization steps')

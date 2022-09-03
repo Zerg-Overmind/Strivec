@@ -472,7 +472,7 @@ class PointTensorBase_adapt(TensorBase):
         #  ################if need to return depth during visualization (test time)
         if return_depth:
             with torch.no_grad():
-                z_val = t_min[ray_id] + step_id * (shift[ray_id] if shift is not None else self.stepSize)
+                z_val = t_min[ray_id] + step_id * self.stepSize
                 depth_map = segment_coo(
                     src=(alpha.unsqueeze(-1) * z_val[..., None]),
                     index=ray_id,
@@ -487,33 +487,6 @@ class PointTensorBase_adapt(TensorBase):
         rgb_map = rgb_map.clamp(0, 1)
         return rgb_map, depth_map, rgb, ray_id, weights # rgb, sigma, alpha, weight, bg_weight
 
-    def sample_ray_cuda(self, rays_o, rays_d, use_mask=True, random=False, N_samples=-1):
-        '''Sample query points on rays.
-        All the output points are sorted from near to far.
-        Input:
-            rays_o, rayd_d:   both in [N, 3] indicating ray configurations.
-        Output:
-            ray_pts:          [M, 3] storing all the sampled points.
-            ray_id:           [M]    the index of the ray of each point.
-            step_id:          [M]    the i'th step on a ray of each point.
-        '''
-        near, far = self.near_far
-        rays_o = rays_o.view(-1,3).contiguous()
-        rays_d = rays_d.view(-1,3).contiguous()
-        if random:
-            shift = (torch.rand(rays_o.shape[0], dtype=rays_d.dtype, device=rays_d.device) - 0.5) * self.stepSize
-            ray_pts, mask_outbbox, ray_id, step_id, N_steps, t_min, t_max = render_utils_cuda.sample_pts_on_rays_dist(
-                rays_o, rays_d, self.aabb[0], self.aabb[1], near, far, self.stepSize, shift)
-        else:
-            ray_pts, mask_outbbox, ray_id, step_id, N_steps, t_min, t_max = render_utils_cuda.sample_pts_on_rays(rays_o, rays_d, self.aabb[0], self.aabb[1], near, far, self.stepSize)
-
-        mask_inbbox = ~mask_outbbox
-        if use_mask:
-            ray_pts = ray_pts[mask_inbbox]
-            ray_id = ray_id[mask_inbbox]
-            step_id = step_id[mask_inbbox]
-
-        return ray_pts, t_min, ray_id, step_id
 
     @torch.no_grad()
     def shrink(self, new_aabb):

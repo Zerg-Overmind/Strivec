@@ -49,10 +49,9 @@ fea_pe = 2
 
 L1_weight_inital = 1e-5
 L1_weight_rest = 1e-5
-rm_weight_mask_thre = 1e-4
 ray_type=2
 skip_zero_grad=1
-gpu_ids="0"
+gpu_ids="1"
 vox_res = 320
 vox_range=[0.4, 0.4, 0.4, 0.2, 0.2, 0.2]
 vox_center=[1,0]

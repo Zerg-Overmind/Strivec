@@ -164,10 +164,6 @@ def reconstruction(args, geo, train_dataset, test_dataset):
     if args.ray_type != 1: # if inward facing
         mask_filtered, tensoRF_per_ray = tensorf.filtering_rays(allrays, allrgbs, bbox_only=True)
         allrays, allrgbs = allrays[mask_filtered], allrgbs[mask_filtered]
-        if args.rnd_ray > 0:
-            allalpha = train_dataset.all_alpha[mask_filtered]
-            allijs = train_dataset.ijs[mask_filtered]
-            allc2ws = train_dataset.c2ws[mask_filtered]
     trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
 
     # set loss for tensor constraint
@@ -297,10 +293,7 @@ def reconstruction(args, geo, train_dataset, test_dataset):
             mask_filtered, tensoRF_per_ray = tensorf.filtering_rays(allrays, allrgbs)
             tensoRF_per_ray = None if tensoRF_per_ray is None else tensoRF_per_ray.to(device)
             allrays, allrgbs = allrays[mask_filtered], allrgbs[mask_filtered]
-            if args.rnd_ray > 0:
-                allalpha = allalpha[mask_filtered]
-                allijs = allijs[mask_filtered]
-                allc2ws = allc2ws[mask_filtered]
+
 
             trainingSampler = SimpleSampler(allrgbs.shape[0], args.batch_size)
 
@@ -347,7 +340,7 @@ def reconstruction(args, geo, train_dataset, test_dataset):
         print('========>',c2ws.shape)
         os.makedirs(f'{logfolder}/imgs_path_all', exist_ok=True)
         evaluation_path(test_dataset, tensorf, c2ws, renderer, f'{logfolder}/imgs_path_all/', N_vis=-1, N_samples=-1, white_bg = white_bg, ray_type=ray_type,device=device)
-        
+
 
 def add_dim(obj, times, div=False):
     if obj is None:
@@ -411,7 +404,7 @@ if __name__ == '__main__':
 
     dataset = dataset_dict[args.dataset_name]
     train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False,
-                            rnd_ray=args.rnd_ray, args=args)
+                            rnd_ray=False, args=args)
     test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True, args=args)
 
     pnts = get_density_pnts(args, train_dataset) if args.use_geo < 0 else None # a quickly generate points by a dvgo
