@@ -654,12 +654,12 @@ def construct_voxrange_points_mean(geo, vox_range, partition_xyz=None, space_min
     # xyz, N, 3
 
     xyz = geo[..., :3] if partition_xyz is None else partition_xyz
-    if space_min is None:
+    if space_min is None: # 1
         xyz_min, xyz_max = torch.min(xyz, dim=-2)[0], torch.max(xyz, dim=-2)[0]
         space_edge = (xyz_max - xyz_min) * 1.0
         xyz_mid = (xyz_max + xyz_min) / 2
         space_min = xyz_mid - space_edge / 2
-    else:
+    else: 
         xyz_mid = (space_min + space_max) / 2
         space_edge = space_max - space_min
         mask = (xyz - space_min[None,...])
@@ -677,12 +677,13 @@ def construct_voxrange_points_mean(geo, vox_range, partition_xyz=None, space_min
     print("shift", shift)
     xyz_shift = xyz - shift
     sparse_grid_idx, inv_idx = torch.unique(torch.floor(xyz_shift / vox_range[None, ...]).to(torch.int32), dim=0, return_inverse=True)
-    if vox_center:
+    if vox_center: # 1
         vox_center = (sparse_grid_idx + 0.5) * vox_range[None, ...] + shift
         geo = torch.cat([vox_center, scatter_mean(geo[..., -1], inv_idx, dim=0)[..., None]], dim=-1)
     else:
         geo = scatter_mean(geo, inv_idx, dim=0)
-    return geo
+    
+    return geo, xyz, sparse_grid_idx, inv_idx
 
 
 def transform_points_to_voxels(points, point_cloud_range, voxel_sizes, max_pnts_per_vox, max_voxels, voxel_generator=None):
