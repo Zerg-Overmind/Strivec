@@ -18,23 +18,27 @@ def load(pointfile):
     else:
         return None
 
+
+def gen_pnts(args):
+    if args.pointfile.endswith('ply'):
+        # points_path = os.path.join(self.root_dir, "exported/pcd.ply")
+        geo = mvs_utils.load_ply_points(args)
+    elif args.pointfile == 'depth':
+        colordir = os.path.join(args.datadir, "exported/color")
+        image_paths = [f for f in os.listdir(colordir) if os.path.isfile(os.path.join(colordir, f))]
+        image_paths = [os.path.join(args.datadir, "exported/color/{}.jpg".format(i)) for i in
+                            range(len(image_paths))]
+        all_id_list = mvs_utils.filter_valid_id(args, list(range(len(image_paths))))
+        depth_intrinsic = np.loadtxt(
+            os.path.join(args.datadir, "exported/intrinsic/intrinsic_depth.txt")).astype(np.float32)[:3, :3]
+        geo = mvs_utils.load_init_depth_points(args, all_id_list, depth_intrinsic, device="cuda")
+        # np.savetxt(os.path.join(args.basedir, args.expname, "depth.txt"), geo.cpu().numpy(), delimiter=";")
+    else:
+        geo = load(args.pointfile)
+    return geo
+
 def gen_geo(args, geo=None):
-    if geo is None:
-        if args.pointfile.endswith('ply'):
-            # points_path = os.path.join(self.root_dir, "exported/pcd.ply")
-            geo = mvs_utils.load_ply_points(args)
-        elif args.pointfile == 'depth':
-            colordir = os.path.join(args.datadir, "exported/color")
-            image_paths = [f for f in os.listdir(colordir) if os.path.isfile(os.path.join(colordir, f))]
-            image_paths = [os.path.join(args.datadir, "exported/color/{}.jpg".format(i)) for i in
-                                range(len(image_paths))]
-            all_id_list = mvs_utils.filter_valid_id(args, list(range(len(image_paths))))
-            depth_intrinsic = np.loadtxt(
-                os.path.join(args.datadir, "exported/intrinsic/intrinsic_depth.txt")).astype(np.float32)[:3, :3]
-            geo = mvs_utils.load_init_depth_points(args, all_id_list, depth_intrinsic, device="cuda")
-            # np.savetxt(os.path.join(args.basedir, args.expname, "depth.txt"), geo.cpu().numpy(), delimiter=";")
-        else:
-            geo = load(args.pointfile)
+
     if geo is None:
         print("Do MVS to create pointfile at ", args.pointfile)
         dataset = mvs_dataset_dict[args.dataset_name]

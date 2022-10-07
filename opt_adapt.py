@@ -11,7 +11,7 @@ def config_parser(cmd=None):
     parser.add_argument("--add_timestamp", type=int, default=0,
                         help='add timestamp to dir')
     parser.add_argument("--use_geo", type=int, default=1,
-                        help='1 for geo, 0 for not using geo, -1 for vox estimation')
+                        help='1 for geo, 0 for not using geo, -1 for use dvgo density estimation ')
     parser.add_argument("--skip_zero_grad", type=int, default=0,
                         help='use masked adam for skip zero')
     parser.add_argument("--datadir", type=str, default='./data/llff/fern',

@@ -5,7 +5,7 @@ args = config_parser()
 print(args)
 os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu_ids
 from models.apparatus import *
-from recon_prior_adapt import gen_geo
+from recon_prior_adapt import gen_geo, gen_pnts
 import json, random
 from renderer import *
 from utils import *
@@ -410,10 +410,10 @@ if __name__ == '__main__':
                             rnd_ray=False, args=args)
     test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True, args=args)
 
-    pnts = get_density_pnts(args, train_dataset) if args.use_geo < 0 else None # a quickly generate points by a dvgo
+    pnts = get_density_pnts(args, train_dataset) if args.use_geo < 0 else gen_pnts(args)[...,:3] # a quickly generate points by a dvgo
     # coarse
     # np.savetxt(os.path.dirname(args.ckpt), pnt.cpu().numpy(), delimiter=";")
-    geo, xyz, grid_idx_lst, inv_idx_lst = gen_geo(args, geo=pnts) if args.use_geo != 0 else None # generate tensoRFs' position (xyz)
+    geo, xyz, grid_idx_lst, inv_idx_lst = gen_geo(args, geo=pnts) if args.use_geo != 0 else [None, None, None] # generate tensoRFs' position (xyz)
     #vis_box(geo, args) # visualize tensoRF as rectangle boxes, able to rotate
     
     ########## PCA
