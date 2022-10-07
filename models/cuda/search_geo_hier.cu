@@ -150,8 +150,9 @@ __global__ void get_geo_inds_cuda_kernel(
      const float px = pnt_xyz[i_shift];
      const float py = pnt_xyz[i_shift+1];
      const float pz = pnt_xyz[i_shift+2];
-
-     const int xind = (px - xyz_min[0]) / units[0];
+     
+     // the xyz index of every tenserf center in unit
+     const int xind = (px - xyz_min[0]) / units[0]; 
      const int yind = (py - xyz_min[1]) / units[1];
      const int zind = (pz - xyz_min[2]) / units[2];
      const int gx = gridSize[0];
@@ -160,6 +161,8 @@ __global__ void get_geo_inds_cuda_kernel(
      const int lx = ceil(local_range[0] / units[0]);
      const int ly = ceil(local_range[1] / units[0]);
      const int lz = ceil(local_range[2] / units[0]);
+     
+     // shift between the actual local range and the predefined local range in unit
      const int xmin = max(min(xind-lx, gx), 0);
      const int xmax = max(min(xind+lx+1, gx), 0);
      const int ymin = max(min(yind-ly, gy), 0);
@@ -167,7 +170,7 @@ __global__ void get_geo_inds_cuda_kernel(
      const int zmin = max(min(zind-lz, gz), 0);
      const int zmax = max(min(zind+lz+1, gz), 0);
      for (int i = xmin; i < xmax; i++){
-        int shiftx = i * gy * gz;
+        int shiftx = i * gy * gz; // shift for i_th unit
         for (int j = ymin; j < ymax; j++){
             int shifty = j * gz;
             for (int k = zmin; k < zmax; k++){
@@ -179,6 +182,80 @@ __global__ void get_geo_inds_cuda_kernel(
      }
   }
 }
+
+
+template <typename scalar_t>
+__global__ void get_cubic_geo_inds_cuda_kernel(
+        scalar_t* __restrict__ local_range,
+        int64_t* __restrict__ gridSize,
+        scalar_t* __restrict__ units,
+        scalar_t* __restrict__ radius,
+        scalar_t* __restrict__ xyz_min,
+        scalar_t* __restrict__ xyz_max,
+        scalar_t* __restrict__ pnt_xyz,
+        scalar_t* __restrict__ geo_rot,
+        int64_t* __restrict__ tensoRF_cvrg_inds,
+        const int n_pts
+        ) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if(idx<n_pts) {
+     const int i_shift = idx * 3;
+     const int i_shift_R = i_shift * 3;
+     const float px = pnt_xyz[i_shift];
+     const float py = pnt_xyz[i_shift+1];
+     const float pz = pnt_xyz[i_shift+2];
+     float local_range_every_0 = local_range[i_shift];
+     float local_range_every_1 = local_range[i_shift+1];
+     float local_range_every_2 = local_range[i_shift+2];
+     float r_k = radius[idx];
+
+     // the xyz index of every tenserf center in unit
+     const int xind = (px - xyz_min[0]) / units[0]; 
+     const int yind = (py - xyz_min[1]) / units[1];
+     const int zind = (pz - xyz_min[2]) / units[2];
+     const int gx = gridSize[0];
+     const int gy = gridSize[1];
+     const int gz = gridSize[2];
+     const int lx = ceil(local_range_every_0 / units[0]);
+     const int ly = ceil(local_range_every_1 / units[0]);
+     const int lz = ceil(local_range_every_2 / units[0]);
+     const int xmin = max(min(xind-lx, gx), 0);
+     const int xmax = max(min(xind+lx+1, gx), 0);
+     const int ymin = max(min(yind-ly, gy), 0);
+     const int ymax = max(min(yind+ly+1, gy), 0);
+     const int zmin = max(min(zind-lz, gz), 0);
+     const int zmax = max(min(zind+lz+1, gz), 0);
+     float x_n, x_p, y_n, y_p, z_n, z_p, r_xn, r_xp, r_yn, r_yp, r_zn, r_zp;
+     for (int i = xmin; i < xmax; i++){
+        int shiftx = i * gy * gz; // shift for i_th unit
+        for (int j = ymin; j < ymax; j++){
+            int shifty = j * gz;
+            for (int k = zmin; k < zmax; k++){ 
+                x_n = px - xyz_min[0] - i * units[0]; 
+                x_p = px - xyz_min[0] - (i+1) * units[0];
+                y_n = py - xyz_min[1] - j * units[1];
+                y_p = py - xyz_min[1] - (j+1) * units[1];
+                z_n = pz - xyz_min[2] - k * units[2];
+                z_p = pz - xyz_min[2] - (k+1) * units[2];
+                 
+                // rotation
+                r_xn = x_n * geo_rot[i_shift_R] + y_n * geo_rot[i_shift_R+3]  + z_n * geo_rot[i_shift_R+6];
+                r_xp = x_p * geo_rot[i_shift_R] + y_p * geo_rot[i_shift_R+3]  + z_p * geo_rot[i_shift_R+6];
+                r_yn = x_n * geo_rot[i_shift_R+1] + y_n * geo_rot[i_shift_R+4]  + z_n * geo_rot[i_shift_R+7];
+                r_yp = x_p * geo_rot[i_shift_R+1] + y_p * geo_rot[i_shift_R+4]  + z_p * geo_rot[i_shift_R+7];
+                r_zn = x_n * geo_rot[i_shift_R+2] + y_n * geo_rot[i_shift_R+5]  + z_n * geo_rot[i_shift_R+8];
+                r_zp = x_n * geo_rot[i_shift_R+2] + y_p * geo_rot[i_shift_R+5]  + z_p * geo_rot[i_shift_R+8];
+                if (min(abs(r_xn), abs(r_xp)) < local_range_every_0 && min(abs(r_yn), abs(r_yp)) < local_range_every_1 && min(abs(r_zn), abs(r_zp)) < local_range_every_2) {
+                    tensoRF_cvrg_inds[shiftx + shifty + k] = 1;
+                }
+            }
+        }
+     }
+  }
+}
+
+
+ 
 
 
 template <typename scalar_t>
@@ -207,7 +284,7 @@ __global__ void fill_geo_inds_cuda_kernel(
      const float cy = xyz_min[1] + (indy + 0.5) * units[1];
      const float cz = xyz_min[2] + (indz + 0.5) * units[2];
      float xyz2Buffer[8];
-     int kid = 0, far_ind = 0;
+     int kid = 0, far_ind = 0; 
      float far2 = 0.0;
      for (int i = 0; i < n_pts; i++){
          const int i_shift = i * 3;
@@ -242,6 +319,86 @@ __global__ void fill_geo_inds_cuda_kernel(
      }
      tensoRF_count[cvrg_id] = min(max_tensoRF, kid);
   }
+}
+
+
+template <typename scalar_t>
+__global__ void fill_cubic_geo_inds_cuda_kernel(
+        scalar_t* __restrict__ local_range,
+        int64_t* __restrict__ gridSize,
+        int8_t* __restrict__ tensoRF_count,
+        int16_t* __restrict__ tensoRF_topindx,
+        scalar_t* __restrict__ units,
+        scalar_t* __restrict__ radius,
+        scalar_t* __restrict__ xyz_min,
+        scalar_t* __restrict__ xyz_max,
+        scalar_t* __restrict__ pnt_xyz,
+        scalar_t* __restrict__ geo_rot,
+        int64_t* __restrict__ tensoRF_cvrg_inds,
+        const int max_tensoRF,
+        const int n_pts,
+        const int gridSizeAll
+        ) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if(idx<gridSizeAll && tensoRF_cvrg_inds[idx] >= 0) {
+     const int cvrg_id = tensoRF_cvrg_inds[idx];
+     const int tshift = cvrg_id * max_tensoRF;
+     const int indx = idx / (gridSize[1] * gridSize[2]);
+     const int indy = (idx - (gridSize[1] * gridSize[2]) * indx) / gridSize[2];
+     const int indz = idx % gridSize[2];
+     const float cx = xyz_min[0] + (indx + 0.5) * units[0];
+     const float cy = xyz_min[1] + (indy + 0.5) * units[1];
+     const float cz = xyz_min[2] + (indz + 0.5) * units[2];
+     float xyz2Buffer[8];
+     int kid = 0, far_ind = 0; 
+     float far2 = 0.0;
+
+     for (int i = 0; i < n_pts; i++){
+         const int i_shift = i * 3;
+         const int i_shift_R = i_shift * 3;
+         float xdiff = abs(pnt_xyz[i_shift] - cx);
+         float ydiff = abs(pnt_xyz[i_shift+1] - cy);
+         float zdiff = abs(pnt_xyz[i_shift+2] - cz);
+         float local_range_every_0 = local_range[i_shift];
+         float local_range_every_1 = local_range[i_shift+1];
+         float local_range_every_2 = local_range[i_shift+2];
+
+         float rx_diff = xdiff * geo_rot[i_shift_R] + ydiff * geo_rot[i_shift_R+3]  + zdiff * geo_rot[i_shift_R+6];
+         float ry_diff = xdiff * geo_rot[i_shift_R+1] + ydiff * geo_rot[i_shift_R+4]  + zdiff * geo_rot[i_shift_R+7];
+         float rz_diff = xdiff * geo_rot[i_shift_R+2] + ydiff * geo_rot[i_shift_R+5]  + zdiff * geo_rot[i_shift_R+8];
+
+
+         if (rx_diff < local_range_every_0 && ry_diff < local_range_every_1 && rz_diff < local_range_every_2){
+
+            float xyz2 = rx_diff * rx_diff + ry_diff * ry_diff + rz_diff * rz_diff;
+            if (kid++ < max_tensoRF) {
+                tensoRF_topindx[tshift + kid - 1] = i;
+                xyz2Buffer[kid-1] = xyz2;
+                if (xyz2 > far2){
+                    far2 = xyz2;
+                    far_ind = kid - 1;
+                }
+            } else {
+                if (xyz2 < far2) {
+                    tensoRF_topindx[tshift + far_ind] = i;
+                    xyz2Buffer[far_ind] = xyz2;
+                    far2 = xyz2;
+                    for (int j = 0; j < max_tensoRF; j++) {
+                        if (xyz2Buffer[j] > far2) {
+                            far2 = xyz2Buffer[j];
+                            far_ind = j;
+                        }
+                    }
+                }
+            }
+         }
+     }
+     tensoRF_count[cvrg_id] = min(max_tensoRF, kid);
+  }
+}
+
+
+
 }
 
 
@@ -292,6 +449,67 @@ std::vector<torch::Tensor> build_tensoRF_map_hier_cuda(
         xyz_max.data<scalar_t>(),
         pnt_xyz.data<scalar_t>(),
         tensoRF_cvrg_inds.data<int32_t>(),
+        max_tensoRF,
+        n_pts,
+        gridSizeAll);
+  }));
+  return {tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx};
+}
+
+
+std::vector<torch::Tensor> build_cubic_tensoRF_map_hier_cuda(
+        torch::Tensor pnt_xyz,
+        torch::Tensor gridSize,
+        torch::Tensor xyz_min,
+        torch::Tensor xyz_max,
+        torch::Tensor units,
+        torch::Tensor radius,
+        torch::Tensor local_range,
+        torch::Tensor pnt_rmatrix,
+        torch::Tensor local_dims,
+        const int max_tensoRF) {
+  const int threads = 256;
+  const int n_pts = pnt_xyz.size(0);
+  const int gridSizex = gridSize[0].item<int>();
+  const int gridSizey = gridSize[1].item<int>();
+  const int gridSizez = gridSize[2].item<int>();
+  const int gridSizeAll = gridSizex * gridSizey * gridSizez;
+  auto tensoRF_cvrg_inds = torch::zeros({gridSizex, gridSizey, gridSizez}, torch::dtype(torch::kInt64).device(torch::kCUDA));
+
+  AT_DISPATCH_FLOATING_TYPES(pnt_xyz.type(), "get_cubic_geo_inds", ([&] {
+    get_cubic_geo_inds_cuda_kernel<scalar_t><<<(n_pts+threads-1)/threads, threads>>>(
+        local_range.data<scalar_t>(),
+        gridSize.data<int64_t>(),
+        units.data<scalar_t>(),
+        radius.data<scalar_t>(),
+        xyz_min.data<scalar_t>(),
+        xyz_max.data<scalar_t>(),
+        pnt_xyz.data<scalar_t>(),
+        pnt_rmatrix.data<scalar_t>(),
+        tensoRF_cvrg_inds.data<int64_t>(),
+        n_pts);
+  }));
+
+  tensoRF_cvrg_inds = torch::cumsum(tensoRF_cvrg_inds.view(-1), 0, torch::kInt64) * tensoRF_cvrg_inds.view(-1);
+  const int num_cvrg = tensoRF_cvrg_inds.max().item<int>();
+  tensoRF_cvrg_inds = (tensoRF_cvrg_inds - 1).view({gridSizex, gridSizey, gridSizez});
+
+  auto tensoRF_topindx = torch::full({num_cvrg, max_tensoRF}, -1, torch::dtype(torch::kInt16).device(torch::kCUDA));
+  auto tensoRF_count = torch::zeros({num_cvrg}, torch::dtype(torch::kInt8).device(torch::kCUDA));
+
+  AT_DISPATCH_FLOATING_TYPES(pnt_xyz.type(), "fill_cubic_geo_inds", ([&] {
+    fill_cubic_geo_inds_cuda_kernel<scalar_t><<<(gridSizeAll+threads-1)/threads, threads>>>(
+        local_range.data<scalar_t>(),
+        gridSize.data<int64_t>(),
+        tensoRF_count.data<int8_t>(),
+        tensoRF_topindx.data<int16_t>(),
+        units.data<scalar_t>(),
+        radius.data<scalar_t>(),
+        xyz_min.data<scalar_t>(),
+        xyz_max.data<scalar_t>(),
+        pnt_xyz.data<scalar_t>(),
+        pnt_rmatrix.data<scalar_t>(),
+        tensoRF_cvrg_inds.data<int64_t>(),
         max_tensoRF,
         n_pts,
         gridSizeAll);

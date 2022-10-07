@@ -15,6 +15,31 @@ std::vector<torch::Tensor> build_tensoRF_map_hier_cuda(
         torch::Tensor local_dims,
         const int max_tensoRF);
 
+std::vector<torch::Tensor> build_cubic_tensoRF_map_hier_cuda(
+        torch::Tensor pnt_xyz,
+        torch::Tensor gridSize,
+        torch::Tensor xyz_min,
+        torch::Tensor xyz_max,
+        torch::Tensor units,
+        torch::Tensor radius,
+        torch::Tensor local_range,
+        torch::Tensor pnt_rmatrix,
+        torch::Tensor local_dims,
+        const int max_tensoRF);
+
+
+std::vector<torch::Tensor> build_tensoRF_map_every_hier_cuda(
+        torch::Tensor pnt_xyz,
+        torch::Tensor gridSize,
+        torch::Tensor xyz_min,
+        torch::Tensor xyz_max,
+        torch::Tensor units,
+        const float radiusl,
+        torch::Tensor radiush,
+        torch::Tensor local_range,
+        torch::Tensor local_dims,
+        const int max_tensoRF);
+
 std::vector<torch::Tensor> sample_2_tensoRF_cvrg_hier_cuda(
         torch::Tensor xyz_sampled,
         torch::Tensor xyz_min,
@@ -64,10 +89,58 @@ std::vector<torch::Tensor> build_tensoRF_map_hier(
   return build_tensoRF_map_hier_cuda(pnt_xyz, gridSize, xyz_min, xyz_max, units, local_range, local_dims, max_tensoRF);
 }
 
+std::vector<torch::Tensor> build_cubic_tensoRF_map_hier(
+        torch::Tensor pnt_xyz,
+        torch::Tensor gridSize,
+        torch::Tensor xyz_min,
+        torch::Tensor xyz_max,
+        torch::Tensor units,
+        torch::Tensor radius,
+        torch::Tensor local_range,
+        torch::Tensor pnt_rmatrix,
+        torch::Tensor local_dims,
+        const int max_tensoRF){
+  CHECK_INPUT(pnt_xyz);
+  CHECK_INPUT(gridSize);
+  CHECK_INPUT(xyz_min);
+  CHECK_INPUT(xyz_max);
+  CHECK_INPUT(units);
+  CHECK_INPUT(radius);
+  CHECK_INPUT(local_range);
+  CHECK_INPUT(pnt_rmatrix);
+  CHECK_INPUT(local_dims);
+  assert(pnt_xyz.dim()==2);
+  return build_cubic_tensoRF_map_hier_cuda(pnt_xyz, gridSize, xyz_min, xyz_max, units, radius, local_range, pnt_rmatrix, local_dims, max_tensoRF);
+}
+
+
+std::vector<torch::Tensor> build_tensoRF_map_every_hier(
+     torch::Tensor pnt_xyz,
+     torch::Tensor gridSize,
+     torch::Tensor xyz_min,
+     torch::Tensor xyz_max,
+     torch::Tensor units,
+     const float radiusl,
+     torch::Tensor radiush,
+     torch::Tensor local_range,
+     torch::Tensor local_dims,
+     const int max_tensoRF){
+  CHECK_INPUT(pnt_xyz);
+  CHECK_INPUT(gridSize);
+  CHECK_INPUT(xyz_min);
+  CHECK_INPUT(xyz_max);
+  CHECK_INPUT(local_dims);
+  CHECK_INPUT(radiush);
+  assert(pnt_xyz.dim()==2); 
+  return build_tensoRF_map_every_hier_cuda(pnt_xyz, gridSize, xyz_min, xyz_max, units, radiusl, radiush, local_range, local_dims, max_tensoRF);
+}
+
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("build_tensoRF_map_hier", &build_tensoRF_map_hier, "build tensoRF indices map");
   m.def("sample_2_tensoRF_cvrg_hier", &sample_2_tensoRF_cvrg_hier, "Sampled points to get torsoRF");
+  m.def("build_cubic_tensoRF_map_hier", &build_cubic_tensoRF_map_hier, "build cubic tensoRF indices map");
+  m.def("build_tensoRF_map_every_hier", &build_tensoRF_map_every_hier, "build tensoRF indices map");
 }
 
 
