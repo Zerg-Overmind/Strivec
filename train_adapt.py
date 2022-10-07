@@ -15,6 +15,7 @@ from dataLoader import dataset_dict
 import sys
 from models.masked_adam import MaskedAdam
 from models.init_net.run import get_density_pnts
+from sklearn.decomposition import PCA
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -49,19 +50,19 @@ def render_test(args, geo, train_dataset, test_dataset):
     kwargs = ckpt['kwargs']
     kwargs.update({'device': device})
     kwargs.update({'geo': geo, "args":args, "local_dims":args.local_dims_final})
-
     kwargs.update({'step_ratio': args.step_ratio})
     tensorf = eval(args.model_name)(**kwargs)
     tensorf.load(ckpt)
-
     logfolder = os.path.dirname(args.ckpt)
+    
+    # render_only=0, render_path=0, render_test=1, render_train=0
     if args.render_train:
         os.makedirs(f'{logfolder}/imgs_train_all', exist_ok=True)
         train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=True)
         PSNRs_test = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/', N_vis=-1, N_samples=-1, white_bg = white_bg, ray_type=ray_type,device=device)
         print(f'======> {args.expname} train all psnr: {np.mean(PSNRs_test)} <========================')
 
-    if args.render_test:
+    if args.render_test: # 1
         os.makedirs(f'{logfolder}/{args.expname}/imgs_test_all', exist_ok=True)
         evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/{args.expname}/imgs_test_all/', N_vis=-1, N_samples=-1, white_bg = white_bg, ray_type=ray_type,device=device)
 
@@ -71,8 +72,7 @@ def render_test(args, geo, train_dataset, test_dataset):
         evaluation_path(test_dataset,tensorf, c2ws, renderer, f'{logfolder}/{args.expname}/imgs_path_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ray_type=ray_type,device=device)
 
-def reconstruction(args, geo, train_dataset, test_dataset):
-
+def reconstruction(args, geo, train_dataset, test_dataset, pnts, grid_idx_lst, inv_idx_lst):
     # init dataset
 
     if geo is None:
@@ -103,7 +103,7 @@ def reconstruction(args, geo, train_dataset, test_dataset):
     if args.ckpt is not None:
         ckpt = torch.load(args.ckpt, map_location=device)
         kwargs = ckpt['kwargs']
-        kwargs.update({'device':device, "geo": geo, "local_dims":args.local_dims_final})
+        kwargs.update({'device':device, "geo": geo, "local_dims":args.local_dims_final, "pnts":pnts})
         tensorf = eval(args.model_name)(**kwargs)
         tensorf.load(ckpt)
     else:
@@ -113,7 +113,7 @@ def reconstruction(args, geo, train_dataset, test_dataset):
             alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift,
             distance_scale=args.distance_scale, pos_pe=args.pos_pe, view_pe=args.view_pe,
             fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
-            fea2denseAct=args.fea2denseAct, local_dims=args.local_dims_init, geo=geo, args=args)
+            fea2denseAct=args.fea2denseAct, local_dims=args.local_dims_init, geo=geo, pnts=pnts, grid_idx_lst=grid_idx_lst, inv_idx_lst=inv_idx_lst, args=args)
 
     # init grad, optimizer and lr
 
@@ -136,7 +136,7 @@ def reconstruction(args, geo, train_dataset, test_dataset):
     dim_lst = []
 
     # set upsample voxel dims
-    if args.local_dims_trend is not None:
+    if args.local_dims_trend is not None: # 1
         assert args.upsamp_list is not None and len(args.upsamp_list) == len(args.local_dims_trend[0]), "args.local_dims_trend and args.upsamp_list mismatch "
         for i in range(len(args.local_dims_trend)):
             level_dim_lst = []
@@ -160,8 +160,8 @@ def reconstruction(args, geo, train_dataset, test_dataset):
     # gather rays
 
     allrays, allrgbs = train_dataset.all_rays, train_dataset.all_rgbs
-
-    if args.ray_type != 1: # if inward facing
+   
+    if args.ray_type != 1: # if 2, inward facing; if 1, outward facing
         mask_filtered, tensoRF_per_ray = tensorf.filtering_rays(allrays, allrgbs, bbox_only=True)
         allrays, allrgbs = allrays[mask_filtered], allrgbs[mask_filtered]
         if args.rnd_ray > 0:
@@ -179,7 +179,7 @@ def reconstruction(args, geo, train_dataset, test_dataset):
     TV_weight_density, TV_weight_app = args.TV_weight_density, args.TV_weight_app
     tvreg = TVLoss()
     print(f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}")
-
+   
 
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
 
@@ -195,7 +195,6 @@ def reconstruction(args, geo, train_dataset, test_dataset):
     for iteration in pbar:
         ray_idx = trainingSampler.nextids()
         rays_train, rgb_train, tensoRF_per_ray_train = allrays[ray_idx].to(device), allrgbs[ray_idx].to(device), None if tensoRF_per_ray is None else tensoRF_per_ray[ray_idx].to(device)
-
         # TODO if use gradients to optimze rotation
         if args.rotgrad > 0 and rot_step is not None and iteration in rot_step:
             cur_rot_step = not cur_rot_step
@@ -270,9 +269,12 @@ def reconstruction(args, geo, train_dataset, test_dataset):
                 + f' train_psnr = {float(np.mean(PSNRs)):.2f}'
                 + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
                 + f' mse = {loss:.6f}'
-                + (f' rotx = {tensorf.pnt_rot[0,0] * 180 / np.pi:.6f}' if args.rotgrad > 0 else "")
-                + (f' roty = {tensorf.pnt_rot[0,1] * 180 / np.pi:.6f}' if args.rotgrad > 0 else "")
-                + (f' rotz = {tensorf.pnt_rot[0,2] * 180 / np.pi:.6f}' if args.rotgrad > 0 else "")
+                #+ (f' rotx = {tensorf.pnt_rot[0,0] * 180 / np.pi:.6f}' if args.rotgrad > 0 else "")
+                #+ (f' roty = {tensorf.pnt_rot[0,1] * 180 / np.pi:.6f}' if args.rotgrad > 0 else "")
+                #+ (f' rotz = {tensorf.pnt_rot[0,2] * 180 / np.pi:.6f}' if args.rotgrad > 0 else "")
+                #+ (f' rotx = {tensorf.pnt_rot[0][0,0].cpu().numpy() * 180 / np.pi:.6f}')
+                #+ (f' roty = {tensorf.pnt_rot[0][0,1].cpu().numpy() * 180 / np.pi:.6f}')
+                #+ (f' rotz = {tensorf.pnt_rot[0][0,2].cpu().numpy() * 180 / np.pi:.6f}')
             )
             PSNRs = []
 
@@ -309,7 +311,7 @@ def reconstruction(args, geo, train_dataset, test_dataset):
             find_shadingloss(geo, train_dataset, allrays, allrgbs, tensorf, args, renderer, white_bg, ray_type, device, num_top_rays=args.top_rays[adapt_lvl])
             # tensorf.adapt_add(adapt_lvl)
             adapt_lvl += 1
-
+            
         if args.upsamp_list is not None and iteration in args.upsamp_list:
             local_dims = local_dim_list.pop(0)
             reset = upsamp_reset_list.pop(0) > 0
@@ -383,7 +385,6 @@ def comp_revise(args):
     print("vox_range", args.vox_range)
     return args
 
-
 @torch.no_grad()
 def find_shadingloss(geo, dataset, allrays, allrgbs, tensorf, args, renderer, white_bg, ray_type, device,
                      num_top_rays=1000):
@@ -396,11 +397,15 @@ def find_shadingloss(geo, dataset, allrays, allrgbs, tensorf, args, renderer, wh
     top_xyz = depth_xyz[smallest_inds, :]
     print("top_xyz, smallest_PSNRs, smallest_inds", top_xyz.shape, smallest_PSNRs.shape, smallest_inds.shape)
     np.savetxt("log/ship_adapt_full_0.4_0.2_0.1_2222/depth_xyz_top.txt", top_xyz.cpu().numpy(), delimiter=";")
+    
 
 def vis_box(geo, args):
     for l in range(len(geo)):
         draw_box(geo[l][..., :3], args.local_range[l], f'{args.basedir}/{args.expname}', l)
 
+def vis_box_pca(geo, pca_cluster, args):
+    for l in range(len(geo)):
+        draw_box_pca(geo[l][..., :3], pca_cluster[l], args.local_range[l], f'{args.basedir}/{args.expname}', l, args)
 
 if __name__ == '__main__':
 
@@ -417,14 +422,53 @@ if __name__ == '__main__':
     pnts = get_density_pnts(args, train_dataset) if args.use_geo < 0 else None # a quickly generate points by a dvgo
     # coarse
     # np.savetxt(os.path.dirname(args.ckpt), pnt.cpu().numpy(), delimiter=";")
+    geo, xyz, grid_idx_lst, inv_idx_lst = gen_geo(args, geo=pnts) if args.use_geo != 0 else None # generate tensoRFs' position (xyz)
+    #vis_box(geo, args) # visualize tensoRF as rectangle boxes, able to rotate
+    
+    ########## PCA
+    #geo_cluster= [[[] for _ in range(geo[0].shape[0])], [[] for _ in range(geo[1].shape[0])]]
+    #for k_pnts in range(xyz.shape[0]):
+    #        geo_cluster[0][inv_idx_lst[0][k_pnts]].append(xyz[k_pnts,:].cpu().numpy())
+    #        geo_cluster[1][inv_idx_lst[1][k_pnts]].append(xyz[k_pnts,:].cpu().numpy())
+    #pca_cluster = [[[] for _ in range(geo[0].shape[0])], [[] for _ in range(geo[1].shape[0])]]
+    
+    ##num_sum_1=0
+    ##num_sum_2=0
+    #for k_c_1 in range(geo[0].shape[0]):
+    #    #num_sum_1+=len(geo_cluster[0][k_c_1])
+    #    #print(f'geo_cluster_{k_c_1}={len(geo_cluster[0][k_c_1])}')
+    #    #print(f'geo_cluster_sum={num_sum_1}')
+    #    if len(geo_cluster[0][k_c_1]) > 3:
+    #        pnts_data_0 = np.ones([len(geo_cluster[0][k_c_1]), 3])
+    #        for kk0 in range(len(geo_cluster[0][k_c_1])):
+    #            pnts_data_0[kk0, :] = geo_cluster[0][k_c_1][kk0]  
+    #        pca_k=PCA(n_components=3)
+    #        new_pnts_0=pca_k.fit_transform(pnts_data_0)
+    #        pnts_denorm0 = new_pnts_0*np.array([pnts_data_0[:,0].max()-pnts_data_0[:,0].min(), pnts_data_0[:,1].max()-pnts_data_0[:,1].min(), pnts_data_0[:,2].max()-pnts_data_0[:,2].min()])+ np.array([pnts_data_0[:,0].min(), pnts_data_0[:,1].min(), pnts_data_0[:,2].min()])                                   
+    #        pca_cluster[0][k_c_1].append(pnts_denorm0)
+            #pca_cluster[0][k_c].append(pca_k.explained_variance_ratio_)
+    #for k_c_2 in range(geo[1].shape[0]):  
+    #    #num_sum_2+=len(geo_cluster[1][k_c_2])
+    #    #print(f'geo_cluster_{k_c_2}={len(geo_cluster[1][k_c_2])}')
+    #    #print(f'geo_cluster_sum={num_sum_1+len(geo_cluster[1][k_c_2])}')
+    #    if len(geo_cluster[1][k_c_2]) > 3:
+    #        pnts_data_1 = np.ones([len(geo_cluster[1][k_c_2]), 3])
+    #        for kk1 in range(len(geo_cluster[1][k_c_2])):
+    #            pnts_data_1[kk1, :] = geo_cluster[1][k_c_2][kk1] 
+    #        pca_k=PCA(n_components=3)
+    #        new_pnts_1=pca_k.fit_transform(pnts_data_1)
+    #        pnts_denorm1 = new_pnts_1*np.array([pnts_data_1[:,0].max()-pnts_data_1[:,0].min(), pnts_data_1[:,1].max()-pnts_data_1[:,1].min(), pnts_data_1[:,2].max()-pnts_data_1[:,2].min().T])+ np.array([pnts_data_1[:,0].min(), pnts_data_1[:,1].min(), pnts_data_1[:,2].min()]) 
+    #        pca_cluster[1][k_c_2].append(pnts_denorm1)
 
-    geo = gen_geo(args, geo=pnts) if args.use_geo != 0 else None # generate tensoRFs' position (xyz)
-    vis_box(geo, args) # visualize tensoRF as rectangle boxes, able to rotate
+    ###########
+    ##np.savetxt(args.pointfile[:-4] + "_{}_{}_vox_pnts".format(args.datadir.split("/")[-1], args.vox_range[0][0]) + ".txt", pnts.cpu().numpy(), delimiter=";")
+    ##vis_box_pca(geo, pca_cluster, args)
+    ##print(f"cluster_num={len(geo[0])}")
+    
     if args.export_mesh:
         export_mesh(args, geo)
 
     if args.render_only and (args.render_test or args.render_path):
         render_test(args, geo, train_dataset, test_dataset) # run test
-    else:
-        reconstruction(args, geo, train_dataset, test_dataset) # run train and test in the end
-
+    else: # 1
+        reconstruction(args, geo, train_dataset, test_dataset, pnts, grid_idx_lst, inv_idx_lst) # run train and test in the end
