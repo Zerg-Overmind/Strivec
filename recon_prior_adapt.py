@@ -47,15 +47,20 @@ def gen_geo(args, geo=None):
     else:
         print("successfully loaded args.pointfile at : ", args.pointfile, geo.shape)
     geo_lst = []
-    if args.vox_range is not None and not args.pointfile[:-4].endswith("vox"):
+    grid_idx_lst = []
+    inv_idx_lst = []
+    if args.vox_range is not None and not args.pointfile[:-4].endswith("vox"): # 1
+        #geo = load("/home/gqk/cloud_tensoRF/log/ship_points.txt") # mvs points
         geo_xyz, confidence = geo[..., :3], geo[..., -1:]
         for i in range(len(args.vox_range)):
-            geo_lvl = mvs_utils.construct_voxrange_points_mean(geo_xyz, torch.as_tensor(args.vox_range[i], dtype=torch.float32, device=geo.device), vox_center=args.vox_center[i]>0)
+            geo_lvl, xyz, sparse_grid_idx, inv_idx = mvs_utils.construct_voxrange_points_mean(geo_xyz, torch.as_tensor(args.vox_range[i], dtype=torch.float32, device=geo.device), vox_center=args.vox_center[i]>0)
             print("after vox geo shape", geo_lvl.shape)
             np.savetxt(args.pointfile[:-4] + "_{}_{}_vox".format(args.datadir.split("/")[-1], args.vox_range[i][0]) + ".txt", geo_lvl.cpu().numpy(), delimiter=";")
             geo_lst.append(geo_lvl.cuda())
-
-    if args.fps_num is not None:
+            grid_idx_lst.append(sparse_grid_idx.cuda())
+            inv_idx_lst.append(inv_idx.cuda())
+            
+    if args.fps_num is not None: # fps_num=[0]
         for i in range(len(args.fps_num)):
             if len(geo_lst[i]) > args.fps_num[i]:
                 fps_inds = torch_cluster.fps(geo_lst[i][...,:3], ratio=args.fps_num[i]/len(geo_lst[i]), random_start=True)
@@ -63,7 +68,8 @@ def gen_geo(args, geo=None):
                 print("fps_inds", fps_inds.shape, geo_lvl.shape)
                 np.savetxt(args.pointfile[:-4]+"_{}".format(args.fps_num)+".txt", geo_lvl.cpu().numpy(), delimiter=";")
                 geo_lst[i] = geo_lvl.cuda()
-    return geo_lst
+                
+    return geo_lst, xyz, grid_idx_lst, inv_idx_lst
 
 
 
