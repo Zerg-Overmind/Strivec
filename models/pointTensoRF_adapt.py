@@ -13,6 +13,12 @@ from sklearn.decomposition import PCA
 import math
 import time
 
+def vis_box_pca(geo, pca_cluster, local_ranges, args):
+    for l in range(len(geo)):
+        draw_box_pca(geo[l][..., :3], pca_cluster[l], local_ranges[l], f'{args.basedir}/{args.expname}', l, args)
+
+
+
 class PointTensorBase_adapt(TensorBase):
     def __init__(self, aabb, gridSize, device, density_n_comp=8, appearance_n_comp=24, app_dim=27, shadingMode='MLP_PE', alphaMask=None, near_far=[2.0, 6.0], density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, step_ratio=2.0, fea2denseAct='softplus', local_dims=None, geo=None, pnts=None, grid_idx_lst=None, inv_idx_lst=None, args=None):
         super(TensorBase, self).__init__()
@@ -50,13 +56,16 @@ class PointTensorBase_adapt(TensorBase):
         # shading interval w.r.t. voxel size
         self.step_ratio = step_ratio
         # initialize tensorf features along x,y,z
-        self.init_svd_volume(local_dims, device)
+        pca_cluster = self.init_svd_volume(local_dims, device)
         # create grid of scene, update voxel units
         self.update_stepSize(self.local_dims)
         # various position encoding levels
         self.shadingMode, self.pos_pe, self.view_pe, self.fea_pe, self.featureC = shadingMode, pos_pe, view_pe, fea_pe, featureC
         # create mlp networks
         self.init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, device, app_dim=app_dim[0] if args.radiance_add > 0 else None)
+
+        vis_box_pca(self.geo, pca_cluster, self.local_range_adapt, self.args)
+
 
 
     def update_stepSize(self, local_dims):
@@ -272,16 +281,17 @@ class PointTensorBase_adapt(TensorBase):
                     #exit()
                     #tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx = search_geo_hier_cuda.build_tensoRF_map_every_hier(self.pnt_xyz[l], self.gridSize, self.aabb[0], self.aabb[1], self.units, 0.0, self.radius[l], self.local_range[l], self.local_dims[l, :3], self.max_tensoRF[l])
                     
-                    ###### visualize tensorf cvrg
-                    #xs = torch.linspace(self.aabb[0, 0], self.aabb[1, 0], steps=145)
-                    #ys = torch.linspace(self.aabb[0, 1], self.aabb[1, 1], steps=145)
-                    #zs = torch.linspace(self.aabb[0, 2], self.aabb[1, 2], steps=145)
-                    #xx = xs.view(-1, 1, 1).repeat(1, len(ys), len(zs))
-                    #yy = ys.view(1, -1, 1).repeat(len(xs), 1, len(zs))
-                    #zz = zs.view(1, 1, -1).repeat(len(xs), len(ys), 1)
-                    #voxel_init = torch.stack([xx, yy, zz], dim=-1).reshape(-1, 3)
-                    #voxel_final = voxel_init[tensoRF_cvrg_inds.view(-1)>0]
-                    #np.savetxt("/home/gqk/cloud_tensoRF/log/ship_adapt_0.4_0.2/rot_tensoRF/voxel_center.txt", voxel_final, delimiter=";")
+                    ##### visualize tensorf cvrg
+                    xs = torch.linspace(self.aabb[0, 0], self.aabb[1, 0], steps=self.gridSize[0])
+                    ys = torch.linspace(self.aabb[0, 1], self.aabb[1, 1], steps=self.gridSize[1])
+                    zs = torch.linspace(self.aabb[0, 2], self.aabb[1, 2], steps=self.gridSize[2])
+                    xx = xs.view(-1, 1, 1).repeat(1, len(ys), len(zs))
+                    yy = ys.view(1, -1, 1).repeat(len(xs), 1, len(zs))
+                    zz = zs.view(1, 1, -1).repeat(len(xs), len(ys), 1)
+                    voxel_init = torch.stack([xx, yy, zz], dim=-1).reshape(-1, 3)
+                    voxel_final = voxel_init[tensoRF_cvrg_inds.view(-1)>0]
+                    np.savetxt("/home/gqk/cloud_tensoRF/log/ship_adapt_0.4_0.2/rot_tensoRF/voxel_center.txt", voxel_final, delimiter=";")
+                    exit()
                     ######
                     #tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx = search_geo_cuda.build_sphere_tensoRF_map(self.pnt_xyz[l], self.gridSize, self.aabb[0], self.aabb[1], self.units, 0.0, self.radius[l], self.local_dims[l, :3], self.max_tensoRF[l])           
             elif self.args.tensoRF_shape == "sphere":
@@ -603,7 +613,7 @@ class PointTensorCP_adapt(PointTensorBase_adapt):
             self.theta_line, self.phi_line = None, None
 
         if self.args.rot_init is not None and init:
-            _, pca_axis, R_axis, cmpnts = self.init_pca_svd(self.geo)
+            pca_cluster, pca_axis, R_axis, cmpnts = self.init_pca_svd(self.geo)
             self.pca_axis = pca_axis
             pnt_rot_0 = torch.as_tensor(R_axis[0])
             pnt_rot_1 = torch.as_tensor(R_axis[1])
@@ -611,7 +621,11 @@ class PointTensorCP_adapt(PointTensorBase_adapt):
             self.cmpnts = cmpnts
             #self.pnt_rot = torch.nn.ParameterList([torch.nn.Parameter(torch.as_tensor(self.args.rot_init, device="cuda", dtype=torch.float32).repeat(len(geo), 1), requires_grad=self.args.rotgrad>0) for geo in self.geo]).to(device)
 
+
         self.basis_mat = torch.nn.ModuleList([torch.nn.Linear(self.app_n_comp[l][0], self.app_dim[l], bias=False).to(device) for l in range(len(self.app_dim))]).to(device)
+
+        return pca_cluster
+
         # [[64, 27], [32, 27]]
 
     def init_angle_svd(self, n_component, local_dim, dimpos, scale, device, lvl):

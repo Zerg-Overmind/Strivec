@@ -208,44 +208,37 @@ __global__ void get_cubic_geo_inds_cuda_kernel(
      float local_range_every_1 = local_range[i_shift+1];
      float local_range_every_2 = local_range[i_shift+2];
      float r_k = radius[idx];
-
-     // the xyz index of every tenserf center in unit
-     const int xind = (px - xyz_min[0]) / units[0]; 
-     const int yind = (py - xyz_min[1]) / units[1];
-     const int zind = (pz - xyz_min[2]) / units[2];
      const int gx = gridSize[0];
      const int gy = gridSize[1];
      const int gz = gridSize[2];
-     const int lx = ceil(local_range_every_0 / units[0]);
-     const int ly = ceil(local_range_every_1 / units[0]);
-     const int lz = ceil(local_range_every_2 / units[0]);
-     const int xmin = max(min(xind-lx, gx), 0);
-     const int xmax = max(min(xind+lx+1, gx), 0);
-     const int ymin = max(min(yind-ly, gy), 0);
-     const int ymax = max(min(yind+ly+1, gy), 0);
-     const int zmin = max(min(zind-lz, gz), 0);
-     const int zmax = max(min(zind+lz+1, gz), 0);
+
+     const int linds_x = (px - r_k - xyz_min[0]) / units[0];
+     const int hinds_x = (px + r_k - xyz_min[0]) / units[0];
+     const int linds_y = (py - r_k - xyz_min[1]) / units[0];
+     const int hinds_y = (py + r_k - xyz_min[1]) / units[0];
+     const int linds_z = (pz - r_k - xyz_min[2]) / units[0];
+     const int hinds_z = (pz + r_k - xyz_min[2]) / units[0];
+
+     const int xmin = max(min(linds_x, gx), 0);
+     const int xmax = max(min(hinds_x+1, gx), 0);
+     const int ymin = max(min(linds_y, gy), 0);
+     const int ymax = max(min(hinds_y+1, gy), 0);
+     const int zmin = max(min(linds_z, gz), 0);
+     const int zmax = max(min(hinds_z+1, gz), 0);
      float x_n, x_p, y_n, y_p, z_n, z_p, r_xn, r_xp, r_yn, r_yp, r_zn, r_zp;
      for (int i = xmin; i < xmax; i++){
         int shiftx = i * gy * gz; // shift for i_th unit
         for (int j = ymin; j < ymax; j++){
             int shifty = j * gz;
             for (int k = zmin; k < zmax; k++){ 
-                x_n = px - xyz_min[0] - i * units[0]; 
-                x_p = px - xyz_min[0] - (i+1) * units[0];
-                y_n = py - xyz_min[1] - j * units[1];
-                y_p = py - xyz_min[1] - (j+1) * units[1];
-                z_n = pz - xyz_min[2] - k * units[2];
-                z_p = pz - xyz_min[2] - (k+1) * units[2];
-                 
+                x_n = px - xyz_min[0] - (i+0.5) * units[0];
+                y_n = py - xyz_min[1] - (j+0.5) * units[1];
+                z_n = pz - xyz_min[2] - (k+0.5) * units[2];
                 // rotation
                 r_xn = x_n * geo_rot[i_shift_R] + y_n * geo_rot[i_shift_R+3]  + z_n * geo_rot[i_shift_R+6];
-                r_xp = x_p * geo_rot[i_shift_R] + y_p * geo_rot[i_shift_R+3]  + z_p * geo_rot[i_shift_R+6];
                 r_yn = x_n * geo_rot[i_shift_R+1] + y_n * geo_rot[i_shift_R+4]  + z_n * geo_rot[i_shift_R+7];
-                r_yp = x_p * geo_rot[i_shift_R+1] + y_p * geo_rot[i_shift_R+4]  + z_p * geo_rot[i_shift_R+7];
                 r_zn = x_n * geo_rot[i_shift_R+2] + y_n * geo_rot[i_shift_R+5]  + z_n * geo_rot[i_shift_R+8];
-                r_zp = x_n * geo_rot[i_shift_R+2] + y_p * geo_rot[i_shift_R+5]  + z_p * geo_rot[i_shift_R+8];
-                if (min(abs(r_xn), abs(r_xp)) < local_range_every_0 && min(abs(r_yn), abs(r_yp)) < local_range_every_1 && min(abs(r_zn), abs(r_zp)) < local_range_every_2) {
+                if (abs(r_xn) < local_range_every_0 && abs(r_yn) < local_range_every_1 && abs(r_zn) < local_range_every_2) {
                     tensoRF_cvrg_inds[shiftx + shifty + k] = 1;
                 }
             }

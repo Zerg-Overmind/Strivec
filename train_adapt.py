@@ -396,9 +396,7 @@ def vis_box(geo, args):
     for l in range(len(geo)):
         draw_box(geo[l][..., :3], args.local_range[l], f'{args.basedir}/{args.expname}', l)
 
-def vis_box_pca(geo, pca_cluster, args):
-    for l in range(len(geo)):
-        draw_box_pca(geo[l][..., :3], pca_cluster[l], args.local_range[l], f'{args.basedir}/{args.expname}', l, args)
+
 
 if __name__ == '__main__':
 
