@@ -1,6 +1,7 @@
 
 dataset_name = blender
 datadir = ./data/nerf_synthetic/ship
+pointfile = "./log/ship_points.txt"
 expname =  ship_adapt_0.4_0.2
 basedir = ./log
 n_iters = 30000
@@ -25,6 +26,7 @@ top_rays = [1000, 1000, 1000]
 unit_lvl=0 # which lvl to use deciding units
 filterall=1
 max_tensoRF = [2, 2]
+rot_init = [0, 0, 0]
 
 N_vis = 5
 vis_every = 2000
@@ -57,5 +59,5 @@ vox_range=[0.4, 0.4, 0.4, 0.2, 0.2, 0.2]
 vox_center=[1,0]
 
 
-use_geo = -1
+use_geo = 1 # -1 for dvgo
 pre_N_iters = 5000

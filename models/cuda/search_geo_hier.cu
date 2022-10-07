@@ -392,9 +392,6 @@ __global__ void fill_cubic_geo_inds_cuda_kernel(
 
 
 
-}
-
-
 std::vector<torch::Tensor> build_tensoRF_map_hier_cuda(
         torch::Tensor pnt_xyz,
         torch::Tensor gridSize,

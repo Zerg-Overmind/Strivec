@@ -64,7 +64,7 @@ class PointTensorBase_adapt(TensorBase):
         # create mlp networks
         self.init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, device, app_dim=app_dim[0] if args.radiance_add > 0 else None)
 
-        vis_box_pca(self.geo, pca_cluster, self.local_range_adapt, self.args)
+        # vis_box_pca(self.geo, pca_cluster, self.local_range_adapt, self.args)
 
 
 
@@ -74,7 +74,7 @@ class PointTensorBase_adapt(TensorBase):
         self.invaabbSize = 2.0/self.aabbSize
         if self.args.tensoRF_shape == "cube":
             # list of grid voxel edge length for each scale of tensorf
-            self.local_range_adapt = [0.01*torch.as_tensor(self.cmpnts[0], dtype=torch.float).cuda().squeeze().contiguous(), 0.01*torch.as_tensor(self.cmpnts[1], dtype=torch.float).cuda().squeeze().contiguous()]
+            self.local_range_adapt = [0.1*torch.as_tensor(self.cmpnts[0], dtype=torch.float).cuda().squeeze().contiguous(), 0.1*torch.as_tensor(self.cmpnts[1], dtype=torch.float).cuda().squeeze().contiguous()]
             self.lvl_units = [(2 * self.local_range[l] / local_dims[l,:3]) for l in range(self.lvl)]
             # grid voxel edge length for general use
             self.units = self.lvl_units[self.args.unit_lvl]
@@ -290,8 +290,8 @@ class PointTensorBase_adapt(TensorBase):
                     zz = zs.view(1, 1, -1).repeat(len(xs), len(ys), 1)
                     voxel_init = torch.stack([xx, yy, zz], dim=-1).reshape(-1, 3)
                     voxel_final = voxel_init[tensoRF_cvrg_inds.view(-1)>0]
-                    np.savetxt("/home/gqk/cloud_tensoRF/log/ship_adapt_0.4_0.2/rot_tensoRF/voxel_center.txt", voxel_final, delimiter=";")
-                    exit()
+                    np.savetxt(os.path.join(self.args.basedir, self.args.expname, "rot_tensoRF", "voxel_center.txt"), voxel_final, delimiter=";")
+                    # exit()
                     ######
                     #tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx = search_geo_cuda.build_sphere_tensoRF_map(self.pnt_xyz[l], self.gridSize, self.aabb[0], self.aabb[1], self.units, 0.0, self.radius[l], self.local_dims[l, :3], self.max_tensoRF[l])           
             elif self.args.tensoRF_shape == "sphere":

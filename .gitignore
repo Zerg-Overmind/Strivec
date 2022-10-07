@@ -1,0 +1,11 @@
+log/
+data/
+d_0.2_vox.txt
+cyysync.sh
+.idea/
+configs/
+*/__pycache__/
+*/*/__pycache__/
+*.pyc
+git_token
+yysync.sh
