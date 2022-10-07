@@ -13,11 +13,13 @@ from sklearn.decomposition import PCA
 import math
 import time
 
-def vis_box_pca(geo, pca_cluster, local_ranges, args):
+def vis_box_pca(geo, pca_cluster, local_ranges, args, pnt_rmatrix):
     for l in range(len(geo)):
-        draw_box_pca(geo[l][..., :3], pca_cluster[l], local_ranges[l], f'{args.basedir}/{args.expname}', l, args)
+        draw_box_pca(geo[l][..., :3], pca_cluster[l], local_ranges[l], f'{args.basedir}/{args.expname}', l, args, pnt_rmatrix[l].cuda())
 
-
+def vis_box(geo, args):
+    for l in range(len(geo)):
+        draw_box(geo[l][..., :3], args.local_range[l], f'{args.basedir}/{args.expname}', l)
 
 class PointTensorBase_adapt(TensorBase):
     def __init__(self, aabb, gridSize, device, density_n_comp=8, appearance_n_comp=24, app_dim=27, shadingMode='MLP_PE', alphaMask=None, near_far=[2.0, 6.0], density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, step_ratio=2.0, fea2denseAct='softplus', local_dims=None, geo=None, pnts=None, grid_idx_lst=None, inv_idx_lst=None, args=None):
@@ -56,9 +58,16 @@ class PointTensorBase_adapt(TensorBase):
         # shading interval w.r.t. voxel size
         self.step_ratio = step_ratio
         # initialize tensorf features along x,y,z
-        pca_cluster = self.init_svd_volume(local_dims, device)
+        self.init_svd_volume(local_dims, device)
         # create grid of scene, update voxel units
         self.update_stepSize(self.local_dims)
+        
+        pnt_rmatrix = [self.rot2m(self.pnt_rot[0]), self.rot2m(self.pnt_rot[1])]
+        local_range_adapt = [0.05*torch.as_tensor(self.cmpnts[0], dtype=torch.float).cuda().squeeze().contiguous(), 0.05*torch.as_tensor(self.cmpnts[1], dtype=torch.float).cuda().squeeze().contiguous()]
+        #vis_box(geo, args)
+     
+        vis_box_pca(geo, self.pca_cluster, local_range_adapt, args, pnt_rmatrix)
+
         # various position encoding levels
         self.shadingMode, self.pos_pe, self.view_pe, self.fea_pe, self.featureC = shadingMode, pos_pe, view_pe, fea_pe, featureC
         # create mlp networks
@@ -74,7 +83,7 @@ class PointTensorBase_adapt(TensorBase):
         self.invaabbSize = 2.0/self.aabbSize
         if self.args.tensoRF_shape == "cube":
             # list of grid voxel edge length for each scale of tensorf
-            self.local_range_adapt = [0.1*torch.as_tensor(self.cmpnts[0], dtype=torch.float).cuda().squeeze().contiguous(), 0.1*torch.as_tensor(self.cmpnts[1], dtype=torch.float).cuda().squeeze().contiguous()]
+            self.local_range_adapt = [0.05*torch.as_tensor(self.cmpnts[0], dtype=torch.float).cuda().squeeze().contiguous(), 0.05*torch.as_tensor(self.cmpnts[1], dtype=torch.float).cuda().squeeze().contiguous()]
             self.lvl_units = [(2 * self.local_range[l] / local_dims[l,:3]) for l in range(self.lvl)]
             # grid voxel edge length for general use
             self.units = self.lvl_units[self.args.unit_lvl]
@@ -290,7 +299,8 @@ class PointTensorBase_adapt(TensorBase):
                     zz = zs.view(1, 1, -1).repeat(len(xs), len(ys), 1)
                     voxel_init = torch.stack([xx, yy, zz], dim=-1).reshape(-1, 3)
                     voxel_final = voxel_init[tensoRF_cvrg_inds.view(-1)>0]
-                    np.savetxt(os.path.join(self.args.basedir, self.args.expname, "rot_tensoRF", "voxel_center.txt"), voxel_final, delimiter=";")
+                    #np.savetxt(os.path.join(self.args.basedir, self.args.expname, "rot_tensoRF", "voxel_center_{l}.txt"), voxel_final, delimiter=";")
+                    np.savetxt(f"{self.args.basedir}"+f"{self.args.expname}" + f"rot_tensoRF" + f"voxel_center_{l}.txt", voxel_final, delimiter=";")
                     # exit()
                     ######
                     #tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx = search_geo_cuda.build_sphere_tensoRF_map(self.pnt_xyz[l], self.gridSize, self.aabb[0], self.aabb[1], self.units, 0.0, self.radius[l], self.local_dims[l, :3], self.max_tensoRF[l])           
@@ -619,12 +629,11 @@ class PointTensorCP_adapt(PointTensorBase_adapt):
             pnt_rot_1 = torch.as_tensor(R_axis[1])
             self.pnt_rot = [pnt_rot_0, pnt_rot_1]
             self.cmpnts = cmpnts
+            self.pca_cluster = pca_cluster
             #self.pnt_rot = torch.nn.ParameterList([torch.nn.Parameter(torch.as_tensor(self.args.rot_init, device="cuda", dtype=torch.float32).repeat(len(geo), 1), requires_grad=self.args.rotgrad>0) for geo in self.geo]).to(device)
 
 
         self.basis_mat = torch.nn.ModuleList([torch.nn.Linear(self.app_n_comp[l][0], self.app_dim[l], bias=False).to(device) for l in range(len(self.app_dim))]).to(device)
-
-        return pca_cluster
 
         # [[64, 27], [32, 27]]
 

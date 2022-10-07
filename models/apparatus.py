@@ -218,21 +218,23 @@ def draw_box(center_xyz, local_range, log, step, rot_m=None):
 
     vertex = np.array([(corner_xyz[i,0], corner_xyz[i,1], corner_xyz[i,2]) for i in range(len(corner_xyz))],
                          dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
-   
+    
+
     edge = np.array([(8 * a + 0, 8 * a + 1, 255, 165, 0) for a in range(len(center_xyz))] +
-                     [(8 * b + 1, 8 * b + 5, 255, 165, 0) for b in range(len(center_xyz))] +
-                     [(8 * c + 5, 8 * c + 2, 255, 165, 0) for c in range(len(center_xyz))] +
-                     [(8 * d + 2, 8 * d + 0, 255, 165, 0) for d in range(len(center_xyz))] +
-                     [(8 * e + 6, 8 * e + 7, 0  , 255, 0) for e in range(len(center_xyz))] +
-                     [(8 * f + 7, 8 * f + 4, 255, 0,   0) for f in range(len(center_xyz))] +
-                     [(8 * g + 4, 8 * g + 3, 255, 165, 0) for g in range(len(center_xyz))] +
-                     [(8 * h + 3, 8 * h + 6, 255, 165, 0) for h in range(len(center_xyz))] +
-                     [(8 * i + 1, 8 * i + 6, 255, 165, 0) for i in range(len(center_xyz))] +
-                     [(8 * j + 5, 8 * j + 7, 0,   0, 255) for j in range(len(center_xyz))] +
-                     [(8 * k + 2, 8 * k + 4, 255, 165, 0) for k in range(len(center_xyz))] +
-                     [(8 * l + 0, 8 * l + 3, 255, 165, 0) for l in range(len(center_xyz))]
-                     ,dtype = [('vertex1', 'i4'),('vertex2', 'i4'),
-                     ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
+                    [(8 * b + 1, 8 * b + 5, 255, 165, 0) for b in range(len(center_xyz))] +
+                    [(8 * c + 5, 8 * c + 2, 255, 165, 0) for c in range(len(center_xyz))] +
+                    [(8 * d + 2, 8 * d + 0, 255, 165, 0) for d in range(len(center_xyz))] +
+                    [(8 * e + 6, 8 * e + 7, 0  , 255, 0) for e in range(len(center_xyz))] +
+                    [(8 * f + 7, 8 * f + 4, 255, 0,   0) for f in range(len(center_xyz))] +
+                    [(8 * g + 4, 8 * g + 3, 255, 165, 0) for g in range(len(center_xyz))] +
+                    [(8 * h + 3, 8 * h + 6, 255, 165, 0) for h in range(len(center_xyz))] +
+                    [(8 * i + 1, 8 * i + 6, 255, 165, 0) for i in range(len(center_xyz))] +
+                    [(8 * j + 5, 8 * j + 7, 0,   0, 255) for j in range(len(center_xyz))] +
+                    [(8 * k + 2, 8 * k + 4, 255, 165, 0) for k in range(len(center_xyz))] +
+                    [(8 * l + 0, 8 * l + 3, 255, 165, 0) for l in range(len(center_xyz))]
+                    ,dtype = [('vertex1', 'i4'),('vertex2', 'i4'),
+                    ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
+
     ver = PlyElement.describe(vertex, 'vertex')
     edg = PlyElement.describe(edge, 'edge')
     os.makedirs('{}/rot_tensoRF'.format(log), exist_ok=True)
@@ -240,43 +242,62 @@ def draw_box(center_xyz, local_range, log, step, rot_m=None):
         PlyData([ver, edg], text=True).write(f)
 
 def draw_box_pca(center_xyz, pca_cluster, local_range, log, step, args, rot_m=None):
-    sx, sy, sz = local_range[0], local_range[1], local_range[2]
-    shift = torch.as_tensor([[sx, sy, sz],
-                             [-sx, sy, sz],
-                             [sx, -sy, sz],
-                             [sx, sy, -sz],
-                             [sx, -sy, -sz],
-                             [-sx, -sy, sz],
-                             [-sx, sy, -sz],
-                             [-sx, -sy, -sz],
-                             ], dtype=center_xyz.dtype, device=center_xyz.device)[None, ...]
-    corner_xyz = center_xyz[..., None, :] + (torch.matmul(shift, rot_m) if rot_m is not None else shift)
+    corner_xyz_r = []
+    for kn in range(local_range.shape[0]):
+        sx, sy, sz = local_range[kn, 0], local_range[kn, 1], local_range[kn, 2]
+        shift = torch.as_tensor([[sx, sy, sz],
+                                 [-sx, sy, sz],
+                                 [sx, -sy, sz],
+                                 [sx, sy, -sz],
+                                 [sx, -sy, -sz],
+                                 [-sx, -sy, sz],
+                                 [-sx, sy, -sz],
+                                 [-sx, -sy, -sz],
+                                 ], dtype=center_xyz.dtype, device=center_xyz.device)[None, ...]
+        
+        corner_xyz_kn = center_xyz[kn, None, :] + (torch.matmul(shift, rot_m[kn].T) if rot_m is not None else shift)
 
-    corner_xyz = corner_xyz.cpu().detach().numpy().reshape(-1, 3)
-
+        corner_xyz_kn = corner_xyz_kn.cpu().detach().numpy()#.reshape(-1, 3)
+        corner_xyz_r.append(corner_xyz_kn)
+    
+    corner_xyz = np.array(corner_xyz_r).reshape(-1, 3).squeeze()
     vertex = np.array([(corner_xyz[i,0], corner_xyz[i,1], corner_xyz[i,2]) for i in range(len(corner_xyz))],
-                         dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+                             dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
     
     edge = np.array([(8 * a + 0, 8 * a + 1, 255, 165, 0) for a in range(len(center_xyz))] +
-                     [(8 * b + 1, 8 * b + 5, 255, 165, 0) for b in range(len(center_xyz))] +
-                     [(8 * c + 5, 8 * c + 2, 255, 165, 0) for c in range(len(center_xyz))] +
-                     [(8 * d + 2, 8 * d + 0, 255, 165, 0) for d in range(len(center_xyz))] +
-                     [(8 * e + 6, 8 * e + 7, 0  , 255, 0) for e in range(len(center_xyz))] +
-                     [(8 * f + 7, 8 * f + 4, 255, 0,   0) for f in range(len(center_xyz))] +
-                     [(8 * g + 4, 8 * g + 3, 255, 165, 0) for g in range(len(center_xyz))] +
-                     [(8 * h + 3, 8 * h + 6, 255, 165, 0) for h in range(len(center_xyz))] +
-                     [(8 * i + 1, 8 * i + 6, 255, 165, 0) for i in range(len(center_xyz))] +
-                     [(8 * j + 5, 8 * j + 7, 0,   0, 255) for j in range(len(center_xyz))] +
-                     [(8 * k + 2, 8 * k + 4, 255, 165, 0) for k in range(len(center_xyz))] +
-                     [(8 * l + 0, 8 * l + 3, 255, 165, 0) for l in range(len(center_xyz))]
-                     ,dtype = [('vertex1', 'i4'),('vertex2', 'i4'),
-                     ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
-
-    np.savetxt(args.pointfile[:-4] + "_{}_{}_vox_tensorfs".format(args.datadir.split("/")[-1], args.vox_range[step][0]) + ".txt", center_xyz.cpu().numpy(), delimiter=";")
-    for k_cl in range(len(pca_cluster)):
-       if len(pca_cluster[k_cl])>0:
-         with open(args.pointfile[:-4] + "_{}_{}_vox_pca".format(args.datadir.split("/")[-1], args.vox_range[step][0]) + ".txt", 'a+') as ff:
-           np.savetxt(ff, pca_cluster[k_cl][0], delimiter=";")
+                    [(8 * b + 1, 8 * b + 5, 255, 165, 0) for b in range(len(center_xyz))] +
+                    [(8 * c + 5, 8 * c + 2, 255, 165, 0) for c in range(len(center_xyz))] +
+                    [(8 * d + 2, 8 * d + 0, 255, 165, 0) for d in range(len(center_xyz))] +
+                    [(8 * e + 6, 8 * e + 7, 0  , 255, 0) for e in range(len(center_xyz))] +
+                    [(8 * f + 7, 8 * f + 4, 255, 0,   0) for f in range(len(center_xyz))] +
+                    [(8 * g + 4, 8 * g + 3, 255, 165, 0) for g in range(len(center_xyz))] +
+                    [(8 * h + 3, 8 * h + 6, 255, 165, 0) for h in range(len(center_xyz))] +
+                    [(8 * i + 1, 8 * i + 6, 255, 165, 0) for i in range(len(center_xyz))] +
+                    [(8 * j + 5, 8 * j + 7, 0,   0, 255) for j in range(len(center_xyz))] +
+                    [(8 * k + 2, 8 * k + 4, 255, 165, 0) for k in range(len(center_xyz))] +
+                    [(8 * l + 0, 8 * l + 3, 255, 165, 0) for l in range(len(center_xyz))]
+                    ,dtype = [('vertex1', 'i4'),('vertex2', 'i4'),
+                    ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
+    
+    # edge = np.array([(a[0], a[1], 255, 165, 0) for a in range(len(corner_xyz))] +
+    #                  [(b[0], b[2], 255, 165, 0) for b in range(len(corner_xyz))] +
+    #                  [(c[2], c[5], 255, 165, 0) for c in range(len(corner_xyz))] +
+    #                  [(d[1], d[5], 255, 165, 0) for d in range(len(corner_xyz))] +
+    #                  [(e[0], e[3], 0  , 255, 0) for e in range(len(corner_xyz))] +
+    #                  [(f[1], f[6], 255, 0,   0) for f in range(len(corner_xyz))] +
+    #                  [(g[5], g[7], 255, 165, 0) for g in range(len(corner_xyz))] +
+    #                  [(h[2], h[4], 255, 165, 0) for h in range(len(corner_xyz))] +
+    #                  [(i[3], i[6], 255, 165, 0) for i in range(len(corner_xyz))] +
+    #                  [(j[3], j[4], 0,   0, 255) for j in range(len(corner_xyz))] +
+    #                  [(k[4], k[7], 255, 165, 0) for k in range(len(corner_xyz))] +
+    #                  [(l[6], l[7], 255, 165, 0) for l in range(len(corner_xyz))]
+    #                  ,dtype = [('vertex1', 'i4'),('vertex2', 'i4'),
+    #                  ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
+        #np.savetxt(args.pointfile[:-4] + "_{}_{}_vox_tensorfs".format(args.datadir.split("/")[-1], args.vox_range[step][0]) + ".txt", center_xyz.cpu().numpy(), delimiter=";")
+        #for k_cl in range(len(pca_cluster)):
+        #   if len(pca_cluster[k_cl])>0:
+        #     with open(args.pointfile[:-4] + "_{}_{}_vox_pca".format(args.datadir.split("/")[-1], args.vox_range[step][0]) + ".txt", 'a+') as ff:
+        #       np.savetxt(ff, pca_cluster[k_cl][0], delimiter=";")
        
     ver = PlyElement.describe(vertex, 'vertex')
     edg = PlyElement.describe(edge, 'edge')
