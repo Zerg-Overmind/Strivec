@@ -80,6 +80,13 @@ def config_parser(cmd=None):
         help='local tensoRF half range'
     )
     parser.add_argument(
+        '--local_unit',
+        type=float,
+        nargs='+',
+        default=None,
+        help='local unit for each stage'
+    )
+    parser.add_argument(
         '--local_dims_init',
         type=int,
         nargs='+',

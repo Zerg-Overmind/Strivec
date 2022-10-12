@@ -354,7 +354,7 @@ def add_dim(obj, times, div=False):
             obj_lst.append([obj[i] for i in range(j*leng, j*leng+leng)])
         return obj_lst
     else:
-        assert len(obj) % times == 0, "{} should be times of 3".format(obj)
+        assert len(obj) % times == 0, "{} should be times of {}".format(obj, times)
         obj_lst = []
         for j in range(len(obj) // times):
             obj_lst.append([obj[j*times+i] for i in range(times)])
@@ -376,6 +376,7 @@ def comp_revise(args):
     print("n_lamb_sigma", args.n_lamb_sigma)
     print("n_lamb_sh", args.n_lamb_sh)
     print("vox_range", args.vox_range)
+    args.local_unit = add_dim(args.local_unit, 1 + len(args.upsamp_list))
     return args
 
 @torch.no_grad()

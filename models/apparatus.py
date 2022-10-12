@@ -35,6 +35,14 @@ search_geo_hier_cuda = load(
     verbose=True)
 
 
+search_geo_adapt_cuda = load(
+    name='search_geo_adapt_cuda',
+    sources=[
+        os.path.join(parent_dir, path)
+        for path in ['cuda/search_geo_adapt.cpp', 'cuda/search_geo_adapt.cu']],
+    verbose=True)
+
+
 def positional_encoding(positions, freqs):
     freq_bands = (2 ** torch.arange(freqs).float()).to(positions.device)  # (F,)
     pts = (positions[..., None] * freq_bands).reshape(
@@ -241,6 +249,12 @@ def draw_box(center_xyz, local_range, log, step, rot_m=None):
     with open('{}/rot_tensoRF/{}.ply'.format(log, step), mode='wb') as f:
         PlyData([ver, edg], text=True).write(f)
 
+
+def mask_split(tensor, indices):
+    unique = torch.unique(indices)
+    times = len(indices) // len(tensor)
+    return [tensor.repeat(times, 1)[indices == i].cpu() for i in unique], unique
+
 def draw_box_pca(center_xyz, pca_cluster, local_range, log, step, args, rot_m=None):
     corner_xyz_r = []
     for kn in range(local_range.shape[0]):
@@ -254,7 +268,7 @@ def draw_box_pca(center_xyz, pca_cluster, local_range, log, step, args, rot_m=No
                                  [-sx, sy, -sz],
                                  [-sx, -sy, -sz],
                                  ], dtype=center_xyz.dtype, device=center_xyz.device)[None, ...]
-        
+        # import pdb;pdb.set_trace()
         corner_xyz_kn = center_xyz[kn, None, :] + (torch.matmul(shift, rot_m[kn].T) if rot_m is not None else shift)
 
         corner_xyz_kn = corner_xyz_kn.cpu().detach().numpy()#.reshape(-1, 3)
@@ -278,32 +292,61 @@ def draw_box_pca(center_xyz, pca_cluster, local_range, log, step, args, rot_m=No
                     [(8 * l + 0, 8 * l + 3, 255, 165, 0) for l in range(len(center_xyz))]
                     ,dtype = [('vertex1', 'i4'),('vertex2', 'i4'),
                     ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
-    
-    # edge = np.array([(a[0], a[1], 255, 165, 0) for a in range(len(corner_xyz))] +
-    #                  [(b[0], b[2], 255, 165, 0) for b in range(len(corner_xyz))] +
-    #                  [(c[2], c[5], 255, 165, 0) for c in range(len(corner_xyz))] +
-    #                  [(d[1], d[5], 255, 165, 0) for d in range(len(corner_xyz))] +
-    #                  [(e[0], e[3], 0  , 255, 0) for e in range(len(corner_xyz))] +
-    #                  [(f[1], f[6], 255, 0,   0) for f in range(len(corner_xyz))] +
-    #                  [(g[5], g[7], 255, 165, 0) for g in range(len(corner_xyz))] +
-    #                  [(h[2], h[4], 255, 165, 0) for h in range(len(corner_xyz))] +
-    #                  [(i[3], i[6], 255, 165, 0) for i in range(len(corner_xyz))] +
-    #                  [(j[3], j[4], 0,   0, 255) for j in range(len(corner_xyz))] +
-    #                  [(k[4], k[7], 255, 165, 0) for k in range(len(corner_xyz))] +
-    #                  [(l[6], l[7], 255, 165, 0) for l in range(len(corner_xyz))]
-    #                  ,dtype = [('vertex1', 'i4'),('vertex2', 'i4'),
-    #                  ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
         #np.savetxt(args.pointfile[:-4] + "_{}_{}_vox_tensorfs".format(args.datadir.split("/")[-1], args.vox_range[step][0]) + ".txt", center_xyz.cpu().numpy(), delimiter=";")
-        #for k_cl in range(len(pca_cluster)):
-        #   if len(pca_cluster[k_cl])>0:
-        #     with open(args.pointfile[:-4] + "_{}_{}_vox_pca".format(args.datadir.split("/")[-1], args.vox_range[step][0]) + ".txt", 'a+') as ff:
-        #       np.savetxt(ff, pca_cluster[k_cl][0], delimiter=";")
-       
+    # for k_cl in range(len(pca_cluster)):
+    #   if len(pca_cluster[k_cl])>0:
+    #     with open(args.pointfile[:-4] + "_{}_{}_vox_pca".format(args.datadir.split("/")[-1], args.vox_range[step][0]) + ".txt", 'a+') as ff:
+    #       np.savetxt(ff, pca_cluster[k_cl][0], delimiter=";")
     ver = PlyElement.describe(vertex, 'vertex')
     edg = PlyElement.describe(edge, 'edge')
     os.makedirs('{}/rot_tensoRF'.format(log), exist_ok=True)
     with open('{}/rot_tensoRF/{}_pca.ply'.format(log, step), mode='wb') as f:
         PlyData([ver, edg], text=True).write(f)
+
+
+def draw_sep_box_pca(raw_cluster, center_xyz, pca_cluster, local_range, log, step, args, rot_m=None):
+    for kn in range(local_range.shape[0]):
+        sx, sy, sz = local_range[kn, 0], local_range[kn, 1], local_range[kn, 2]
+        shift = torch.as_tensor([[sx, sy, sz],
+                                 [-sx, sy, sz],
+                                 [sx, -sy, sz],
+                                 [sx, sy, -sz],
+                                 [sx, -sy, -sz],
+                                 [-sx, -sy, sz],
+                                 [-sx, sy, -sz],
+                                 [-sx, -sy, -sz],
+                                 ], dtype=center_xyz.dtype, device=center_xyz.device)[None, ...]
+        # import pdb;pdb.set_trace()
+        corner_xyz_kn = center_xyz[kn, None, :] + (torch.matmul(shift, rot_m[kn].T) if rot_m is not None else shift)
+
+        corner_xyz = corner_xyz_kn.cpu().detach().numpy().reshape(-1, 3)
+        vertex = np.array([(corner_xyz[i, 0], corner_xyz[i, 1], corner_xyz[i, 2]) for i in range(len(corner_xyz))], dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+
+        edge = np.array([(0, 1, 255, 165, 0)] +
+                    [(1, 5, 255, 165, 0)] +
+                    [(5, 2, 255, 165, 0)] +
+                    [(2, 0, 255, 165, 0)] +
+                    [(6, 7, 0, 255, 0)] +
+                    [(7, 4, 255, 0, 0)] +
+                    [(4, 3, 255, 165, 0)] +
+                    [(3, 6, 255, 165, 0)] +
+                    [(1, 6, 255, 165, 0)] +
+                    [(5, 7, 0, 0, 255)] +
+                    [(2, 4, 255, 165, 0)] +
+                    [(0, 3, 255, 165, 0)]
+                    , dtype=[('vertex1', 'i4'), ('vertex2', 'i4'),
+                             ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
+    # np.savetxt(args.pointfile[:-4] + "_{}_{}_vox_tensorfs".format(args.datadir.split("/")[-1], args.vox_range[step][0]) + ".txt", center_xyz.cpu().numpy(), delimiter=";")
+    # for k_cl in range(len(pca_cluster)):
+    #   if len(pca_cluster[k_cl])>0:
+    #     with open(args.pointfile[:-4] + "_{}_{}_vox_pca".format(args.datadir.split("/")[-1], args.vox_range[step][0]) + ".txt", 'a+') as ff:
+    #       np.savetxt(ff, pca_cluster[k_cl][0], delimiter=";")
+        ver = PlyElement.describe(vertex, 'vertex')
+        edg = PlyElement.describe(edge, 'edge')
+        os.makedirs('{}/rot_tensoRF/sep/'.format(log), exist_ok=True)
+        with open('{}/rot_tensoRF/sep/box_{:03d}_{}.ply'.format(log, kn, step), mode='wb') as f:
+            PlyData([ver, edg], text=True).write(f)
+        np.savetxt('{}/rot_tensoRF/sep/rawcluster_{:03d}_{}.txt'.format(log, kn, step), raw_cluster[kn], delimiter=";")
 
 
 ''' Misc
