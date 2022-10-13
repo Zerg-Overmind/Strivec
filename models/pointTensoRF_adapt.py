@@ -13,13 +13,13 @@ from sklearn.decomposition import PCA
 import math, time, copy, itertools
 
 
-def vis_box_pca(cluster_raw_pnts, geo, pca_cluster_newpnts, cluster_raw_mean, local_ranges, args, pnt_rmatrix, sep=False):
+def vis_box_pca(cluster_raw_pnts, geo, pca_cluster_newpnts, cluster_raw_mean, local_ranges, args, pnt_rmatrix, sep=False, subdir="rot_tensoRF"):
     for l in range(len(geo)):
         if not sep:
-            draw_box_pca(geo[l][..., :3], pca_cluster_newpnts[l], local_ranges[l], f'{args.basedir}/{args.expname}', l, args, pnt_rmatrix[l].cuda())
+            draw_box_pca(geo[l][..., :3], pca_cluster_newpnts[l], local_ranges[l], f'{args.basedir}/{args.expname}', l, args, pnt_rmatrix[l].cuda(), subdir=subdir)
         else:
             draw_sep_box_pca(cluster_raw_pnts[l], geo[l][..., :3], pca_cluster_newpnts[l], local_ranges[l],
-                         f'{args.basedir}/{args.expname}', l, args, pnt_rmatrix[l].cuda())
+                         f'{args.basedir}/{args.expname}', l, args, pnt_rmatrix[l].cuda(), subdir=subdir)
 def vis_box(geo, args):
     for l in range(len(geo)):
         draw_box(geo[l][..., :3], args.local_range[l], f'{args.basedir}/{args.expname}', l)
@@ -72,7 +72,7 @@ class PointTensorBase_adapt(TensorBase):
         self.geo_xyz, self.local_range, self.local_dims = self.set_local_range_dim(self.geo_xyz, geo_cluster, pca_cluster_newpnts, pca_cluster_edge_leng, cluster_raw_center, pca_axis, pnt_rot, self.stds)
 
         self.pnt_rmatrix = [torch.transpose(pca_axis[l], 1, 2).contiguous() for l in range(self.lvl)]
-        vis_box_pca(geo_cluster, self.geo_xyz, pca_cluster_newpnts, cluster_raw_mean, self.local_range, args, self.pnt_rmatrix, sep=False)
+        vis_box_pca(geo_cluster, self.geo_xyz, pca_cluster_newpnts, cluster_raw_mean, self.local_range, args, self.pnt_rmatrix, sep=True)
 
         # initialize tensorf features along x,y,z
         self.init_svd_volume(self.local_dims, device, pnt_rot=pnt_rot)
@@ -486,6 +486,10 @@ class PointTensorBase_adapt(TensorBase):
         
         local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id = self.sample_2_tensoRF_cvrg_addapt(xyz_sampled, pnt_rmatrix=self.pnt_rmatrix, rotgrad=rot_step)
 
+        # sampled = torch.randint(0, len(xyz_sampled), (10,))
+        # vis_box_pca([xyz_sampled[agg_id[0][sampled]].cpu().numpy()], [self.geo_xyz[0][tensoRF_id[0][sampled]]], [None], [None], [self.local_range[0][tensoRF_id[0][sampled]]], self.args, [self.pnt_rmatrix[0][tensoRF_id[0][sampled]]], sep=True, subdir="debug")
+        # exit()
+
         sigma_feature = self.compute_densityfeature_geo(local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id, sample_num=len(ray_id))
         if shift is None:
             alpha = Raw2Alpha.apply(sigma_feature.flatten(), self.density_shift, self.stepSize * self.distance_scale).reshape(sigma_feature.shape)
@@ -726,7 +730,7 @@ class PointTensorCP_adapt(PointTensorBase_adapt):
     def ind_intrp_line_map_batch_prod(self, density_lines, local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, tensoRF_id):
         return (density_lines[0][local_gindx_s[..., 0], :] * local_gweight_s[:, 0:1] + density_lines[0][local_gindx_l[..., 0], :] * local_gweight_l[:, 0:1]) *  (density_lines[1][local_gindx_s[..., 1], :] * local_gweight_s[:, 1:2] + density_lines[1][local_gindx_l[..., 1], :] * local_gweight_l[:, 1:2]) * (density_lines[2][local_gindx_s[..., 2], :] * local_gweight_s[:, 2:3] + density_lines[2][local_gindx_l[..., 2], :] * local_gweight_l[:, 2:3])
 
-    #
+
     # def ind_intrp_line_batch(self, density_line, local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l):
     #     b_inds = torch.zeros([len(local_gindx_s)], device=density_line.device, dtype=torch.int64)
     #     return density_line[b_inds, :, local_gindx_s] * local_gweight_s[:, None] + density_line[b_inds, :, local_gindx_l] * local_gweight_l[:, None]

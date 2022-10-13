@@ -66,13 +66,18 @@ __global__ void find_pca_tensoRF_and_repos_cuda_kernel(
     const float softindy = (ry + local_range[offset_t+1]) / units[1];
     const float softindz = (rz + local_range[offset_t+2]) / units[2];
 
-    const int indlx = dim_cumsum_counter[offset_t] + min(max((int)softindx, 0), local_dims[offset_t]-1);
-    const int indly = dim_cumsum_counter[offset_t + 1] + min(max((int)softindy, 0), local_dims[offset_t+1]-1);
-    const int indlz = dim_cumsum_counter[offset_t + 2] + min(max((int)softindz, 0), local_dims[offset_t+2]-1);
+    int indlx = min(max((int)softindx, 0), local_dims[offset_t]-1);
+    int indly = min(max((int)softindy, 0), local_dims[offset_t+1]-1);
+    int indlz = min(max((int)softindz, 0), local_dims[offset_t+2]-1);
 
     const float res_x = softindx - indlx;
     const float res_y = softindy - indly;
     const float res_z = softindz - indlz;
+
+    indlx = indlx + dim_cumsum_counter[offset_t];
+    indly = indly + dim_cumsum_counter[offset_t + 1];
+    indlz = indlz + dim_cumsum_counter[offset_t + 2];
+
 
     local_gweight_s[offset_p  ] = 1 - res_x;
     local_gweight_s[offset_p+1] = 1 - res_y;
@@ -297,7 +302,6 @@ __global__ void fill_cubic_geo_inds_cuda_kernel(
          float rx_diff = xdiff * geo_rot[i_shift_R] + ydiff * geo_rot[i_shift_R+3]  + zdiff * geo_rot[i_shift_R+6];
          float ry_diff = xdiff * geo_rot[i_shift_R+1] + ydiff * geo_rot[i_shift_R+4]  + zdiff * geo_rot[i_shift_R+7];
          float rz_diff = xdiff * geo_rot[i_shift_R+2] + ydiff * geo_rot[i_shift_R+5]  + zdiff * geo_rot[i_shift_R+8];
-
 
          if (rx_diff < local_range_every_0 && ry_diff < local_range_every_1 && rz_diff < local_range_every_2){
 

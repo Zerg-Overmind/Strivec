@@ -255,7 +255,7 @@ def mask_split(tensor, indices):
     times = len(indices) // len(tensor)
     return [tensor.repeat(times, 1)[indices == i].cpu() for i in unique], unique
 
-def draw_box_pca(center_xyz, pca_cluster, local_range, log, step, args, rot_m=None):
+def draw_box_pca(center_xyz, pca_cluster, local_range, log, step, args, rot_m=None, subdir="rot_tensoRF"):
     corner_xyz_r = []
     for kn in range(local_range.shape[0]):
         sx, sy, sz = local_range[kn, 0], local_range[kn, 1], local_range[kn, 2]
@@ -299,12 +299,12 @@ def draw_box_pca(center_xyz, pca_cluster, local_range, log, step, args, rot_m=No
     #       np.savetxt(ff, pca_cluster[k_cl][0], delimiter=";")
     ver = PlyElement.describe(vertex, 'vertex')
     edg = PlyElement.describe(edge, 'edge')
-    os.makedirs('{}/rot_tensoRF'.format(log), exist_ok=True)
-    with open('{}/rot_tensoRF/{}_pca.ply'.format(log, step), mode='wb') as f:
+    os.makedirs('{}/{}'.format(log, subdir), exist_ok=True)
+    with open('{}/{}/{}_pca.ply'.format(log, subdir, step), mode='wb') as f:
         PlyData([ver, edg], text=True).write(f)
 
 
-def draw_sep_box_pca(raw_cluster, center_xyz, pca_cluster, local_range, log, step, args, rot_m=None):
+def draw_sep_box_pca(raw_cluster, center_xyz, pca_cluster, local_range, log, step, args, rot_m=None, subdir="rot_tensoRF"):
     for kn in range(local_range.shape[0]):
         sx, sy, sz = local_range[kn, 0], local_range[kn, 1], local_range[kn, 2]
         shift = torch.as_tensor([[sx, sy, sz],
@@ -343,10 +343,11 @@ def draw_sep_box_pca(raw_cluster, center_xyz, pca_cluster, local_range, log, ste
     #       np.savetxt(ff, pca_cluster[k_cl][0], delimiter=";")
         ver = PlyElement.describe(vertex, 'vertex')
         edg = PlyElement.describe(edge, 'edge')
-        os.makedirs('{}/rot_tensoRF/sep/'.format(log), exist_ok=True)
-        with open('{}/rot_tensoRF/sep/box_{:03d}_{}.ply'.format(log, kn, step), mode='wb') as f:
+        os.makedirs('{}/{}/sep/'.format(log, subdir), exist_ok=True)
+        with open('{}/{}/sep/box_{:03d}_{}.ply'.format(log, subdir, kn, step), mode='wb') as f:
             PlyData([ver, edg], text=True).write(f)
-        np.savetxt('{}/rot_tensoRF/sep/rawcluster_{:03d}_{}.txt'.format(log, kn, step), raw_cluster[kn], delimiter=";")
+        # print('{}/{}/sep/rawcluster_{:03d}_{}.txt'.format(log, subdir, kn, step))
+        np.savetxt('{}/{}/sep/rawcluster_{:03d}_{}.txt'.format(log, subdir, kn, step), raw_cluster[kn].reshape(-1,3), delimiter=";")
 
 
 ''' Misc
