@@ -68,8 +68,10 @@ class PointTensorBase_adapt(TensorBase):
         self.up_stage = 0
         if self.args.rot_init is not None:
             assert pnts is not None, "pnts for PCA is None"
-            geo_cluster, pca_cluster_newpnts, pca_cluster_edge_leng, cluster_raw_mean, cluster_raw_center, pca_axis, pnt_rot, self.stds = self.init_pca_svd(self.geo_xyz, pnts)
-        self.geo_xyz, self.local_range, self.local_dims = self.set_local_range_dim(self.geo_xyz, geo_cluster, pca_cluster_newpnts, pca_cluster_edge_leng, cluster_raw_center, pca_axis, pnt_rot, self.stds)
+            geo_cluster, pca_cluster_newpnts, self.pca_cluster_edge_leng, cluster_raw_mean, cluster_raw_center, pca_axis, pnt_rot, self.stds = self.init_pca_svd(self.geo_xyz, pnts)
+        self.local_range, self.local_dims = self.set_local_range_dim(self.geo_xyz, self.pca_cluster_edge_leng, geo_cluster, pca_cluster_newpnts, pca_axis, pnt_rot, self.stds)
+
+        self.geo_xyz = [torch.as_tensor(cluster_raw_center[i], device=device, dtype=torch.float32).contiguous() for i in range(self.lvl)]
 
         self.pnt_rmatrix = [torch.transpose(pca_axis[l], 1, 2).contiguous() for l in range(self.lvl)]
         vis_box_pca(geo_cluster, self.geo_xyz, pca_cluster_newpnts, cluster_raw_mean, self.local_range, args, self.pnt_rmatrix, sep=True)
@@ -85,16 +87,16 @@ class PointTensorBase_adapt(TensorBase):
         self.init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, device, app_dim=app_dim[0] if args.radiance_add > 0 else None)
 
 
-    def set_local_range_dim(self, geo_xyz, geo_cluster, pca_cluster_newpnts, pca_cluster_edge_leng, cluster_raw_center, pca_axis, pnt_rot, stds):
+    def set_local_range_dim(self, geo_xyz, pca_cluster_edge_leng, geo_cluster, pca_cluster_newpnts, pca_axis, pnt_rot, stds):
         device = geo_xyz[0].device
-        geo_xyz = [torch.as_tensor(cluster_raw_center[i], device=device, dtype=torch.float32).contiguous() for i in range(self.lvl)]
         local_dims, local_range = [], []
         for i in range(self.lvl):
             unit = self.args.local_unit[i][self.up_stage]
+            print("unit of level {} is {}".format(self.lvl, unit))
             dims = np.ceil((pca_cluster_edge_leng[i] - unit) * 0.5 / unit).astype(np.int64)
             local_dims.append((torch.as_tensor(dims, dtype=torch.int16, device=device) * 2 + 1).contiguous())
             local_range.append(torch.as_tensor((dims+0.5) * unit, dtype=torch.float32, device=device).contiguous())
-        return geo_xyz, local_range, local_dims
+        return local_range, local_dims
 
     def update_stepSize(self, local_dims):
         print("scene box aabb", self.aabb.view(-1))
@@ -111,7 +113,7 @@ class PointTensorBase_adapt(TensorBase):
             # the grid dims for entire scene
             self.gridSize = torch.ceil(self.aabbSize / self.units).long().to(self.device)
             self.radius = [torch.norm(self.local_range[l], dim=-1).type(torch.float32).cuda().contiguous() for l in range(self.lvl)]
-            print("radius, furthest shading to tensoRF distance: ", self.radius)
+            # print("radius, furthest shading to tensoRF distance: ", self.radius)
         else:
             print("not implemented")
             exit()
@@ -141,7 +143,7 @@ class PointTensorBase_adapt(TensorBase):
             filtered_xyz = xyz_locs[alpha_mask]  # [3414, 3]
             # compute sigma at the positions of filtered_xyz
 
-            local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id = self.sample_2_tensoRF_cvrg_hier(filtered_xyz, pnt_rmatrix=pnt_rmatrix, rotgrad=False)
+            local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id = self.sample_2_tensoRF_cvrg_adapt(filtered_xyz, pnt_rmatrix=pnt_rmatrix, rotgrad=False)
             sigma_feature = self.compute_densityfeature_geo(local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id, sample_num=len(filtered_xyz))
             validsigma = self.feature2density(sigma_feature)
             sigma[alpha_mask] = validsigma
@@ -263,7 +265,7 @@ class PointTensorBase_adapt(TensorBase):
         alpha = torch.zeros_like(samples[...,0])
         pnt_rmatrix = None if self.args.rot_init is None else self.pnt_rmatrix
         for i in range(gridSize[0]):
-            alpha[i] = self.compute_alpha(samples[i].view(-1,3), pnt_rmatrix, i, self.stepSize).view((gridSize[1], gridSize[2]))
+            alpha[i] = self.compute_alpha(samples[i].view(-1,3), pnt_rmatrix, self.stepSize).view((gridSize[1], gridSize[2]))
         return alpha, samples
 
 
@@ -418,14 +420,14 @@ class PointTensorBase_adapt(TensorBase):
         return R
 
 
-    def sample_2_tensoRF_cvrg_addapt(self, xyz_sampled, pnt_rmatrix, rotgrad=False):
+    def sample_2_tensoRF_cvrg_adapt(self, xyz_sampled, pnt_rmatrix, rotgrad=False):
         local_gindx_s_lst, local_gindx_l_lst, local_gweight_s_lst, local_gweight_l_lst, local_kernel_dist_lst, tensoRF_id_lst, agg_id_lst = [], [], [], [], [], [], []
         for l in range(self.lvl):
             mask = None
             if self.args.tensoRF_shape == "cube":
                 if self.args.rot_init is not None:
                 #local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id = search_geo_hier_cuda.sample_2_tensoRF_cvrg_hier(xyz_sampled.contiguous(), self.aabb[0], self.aabb[1], self.units, self.lvl_units[l], self.local_range[l], self.local_dims[l,:3], self.tensoRF_cvrg_inds[l].type(torch.int32), self.tensoRF_count[l].type(torch.int8), self.tensoRF_topindx[l].type(torch.int16), self.geo_xyz[l], self.K_tensoRF[l], self.KNN)
-                    local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id = search_geo_adapt_cuda.sample_2_rot_cubic_tensoRF_cvrg(xyz_sampled.contiguous(), self.aabb[0], self.aabb[1], self.units, self.local_range[l], self.local_dims[l], self.tensoRF_cvrg_inds[l], self.tensoRF_count[l], self.tensoRF_topindx[l], pnt_rmatrix[l], self.geo_xyz[l], self.dim_cumsum_counter[l], self.K_tensoRF[l], self.KNN)
+                    mask, local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id = search_geo_adapt_cuda.sample_2_rot_cubic_tensoRF_cvrg(xyz_sampled.contiguous(), self.aabb[0], self.aabb[1], self.units, self.local_range[l], self.local_dims[l], self.tensoRF_cvrg_inds[l], self.tensoRF_count[l], self.tensoRF_topindx[l], pnt_rmatrix[l], self.geo_xyz[l], self.dim_cumsum_counter[l], self.K_tensoRF[l], self.KNN)
                     # print("local_gindx_s", local_gindx_s[100], self.dim_cumsum_counter[l][tensoRF_id[100]], tensoRF_id[100])
                 else:
                     local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id = search_geo_hier_cuda.sample_2_tensoRF_cvrg_hier(xyz_sampled.contiguous(), self.aabb[0], self.aabb[1], self.units, self.lvl_units[l], self.local_range[l], self.local_dims[l, :3], self.tensoRF_cvrg_inds[l], self.tensoRF_count[l], self.tensoRF_topindx[l], self.geo_xyz[l], self.K_tensoRF[l], self.KNN)
@@ -484,7 +486,7 @@ class PointTensorBase_adapt(TensorBase):
         # local_gweight_s: trilinear interpolation weight of small indices of xyz;
         # local_gweight_l: trilinear interpolation weight of large indices of xyz;
         
-        local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id = self.sample_2_tensoRF_cvrg_addapt(xyz_sampled, pnt_rmatrix=self.pnt_rmatrix, rotgrad=rot_step)
+        local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id = self.sample_2_tensoRF_cvrg_adapt(xyz_sampled, pnt_rmatrix=self.pnt_rmatrix, rotgrad=rot_step)
 
         # sampled = torch.randint(0, len(xyz_sampled), (10,))
         # vis_box_pca([xyz_sampled[agg_id[0][sampled]].cpu().numpy()], [self.geo_xyz[0][tensoRF_id[0][sampled]]], [None], [None], [self.local_range[0][tensoRF_id[0][sampled]]], self.args, [self.pnt_rmatrix[0][tensoRF_id[0][sampled]]], sep=True, subdir="debug")
@@ -537,8 +539,7 @@ class PointTensorBase_adapt(TensorBase):
                     src=(alpha.unsqueeze(-1) * z_val[..., None]),
                     index=ray_id,
                     out=torch.zeros([N, 1], device=alpha.device, dtype=torch.float32),
-                    reduce='sum')[..., 0] / \
-                    torch.clamp(segment_coo(src=alpha.unsqueeze(-1), index=ray_id,
+                    reduce='sum')[..., 0] / torch.clamp(segment_coo(src=alpha.unsqueeze(-1), index=ray_id,
                         out=torch.zeros([N, 1], device=alpha.device, dtype=torch.float32), reduce='sum')[..., 0],
                                 min=1e-6)
                 depth_map += (bg_weight * 1000) if depth_bg else 0
@@ -572,11 +573,14 @@ class PointTensorCP_adapt(PointTensorBase_adapt):
     def __init__(self, aabb, gridSize, device, **kargs):
         super(PointTensorCP_adapt, self).__init__(aabb, gridSize, device, **kargs)
 
-    def init_svd_volume(self, local_dims, device, init=True, pnt_rot=None):
-        ####### starting
+    def cal_cumsum_vec(self, local_dims):
         cumsum_counter = [torch.cat([torch.zeros([1,3], device=local_dims[l].device, dtype=torch.int32), torch.cumsum(local_dims[l] + 1, dim=0, dtype=torch.int32)], dim=0) for l in range(self.lvl)]
         self.dim_sum_counter, self.dim_cumsum_counter = [cumsum_counter[l][-1,:].contiguous() for l in range(self.lvl)], [cumsum_counter[l][:-1,:].contiguous() for l in range(self.lvl)]
 
+
+    def init_svd_volume(self, local_dims, device, init=True, pnt_rot=None):
+        ####### starting
+        self.cal_cumsum_vec(local_dims)
         self.density_line = self.init_one_svd(self.density_n_comp, self.dim_sum_counter, 0.2, device, self.lvl)
         self.app_line = self.init_one_svd(self.app_n_comp, self.dim_sum_counter, 0.2, device, self.lvl)
         if pnt_rot:
@@ -600,6 +604,35 @@ class PointTensorCP_adapt(PointTensorBase_adapt):
         return torch.nn.ParameterList(line_coef).to(device)
 
 
+    def upsample_one_svd(self, lines, local_range, local_dims):
+
+        line_coef = []
+        for l in range(self.lvl):
+            # cur_unit = self.args.local_unit[l][self.up_stage]
+            pre_unit = self.args.local_unit[l][self.up_stage - 1]
+            for dim in range(3):
+                local_gindx_s = []
+                local_gindx_l = []
+                local_gweight_l = []
+                local_gweight_s = []
+                for i in range(len(self.geo_xyz[l])):
+                    cur_pos = torch.linspace(-local_range[l][i,dim], local_range[l][i,dim], steps=local_dims[l][i,dim]+1, device=self.device)
+                    soft_inds = torch.minimum(torch.maximum((cur_pos + self.local_range[l][i,dim]) / pre_unit, torch.as_tensor(0.0, dtype=torch.float32, device=self.device)), self.local_dims[l][i, dim])
+                    inds = torch.minimum(torch.maximum(torch.floor(soft_inds).to(torch.int64), torch.as_tensor(0, dtype=torch.int64, device=self.device)), self.local_dims[l][i,dim]-1)
+                    local_gindx_s.append(inds + self.dim_cumsum_counter[l][i, dim].long())
+                    local_gindx_l.append(local_gindx_s[-1] + 1)
+                    local_gweight_l.append(soft_inds - inds)
+                    local_gweight_s.append(1.0 - local_gweight_l[-1])
+
+                    # print("local_gindx_s_lst", self.local_dims[l][i,dim], local_gindx_s_lst[-1].shape, local_gindx_s_lst[-1].min(), local_gindx_s_lst[-1].max(), local_gweight_l_lst[-1].shape, local_gweight_l_lst[-1].min(), local_gweight_l_lst[-1].max())
+                local_gindx_s = torch.cat(local_gindx_s)
+                local_gindx_l = torch.cat(local_gindx_l)
+                local_gweight_l = torch.cat(local_gweight_l)[:,None]
+                local_gweight_s = torch.cat(local_gweight_s)[:,None]
+                line_coef.append(torch.nn.Parameter(lines[3*l+dim][local_gindx_s] * local_gweight_s + lines[3*l+dim][local_gindx_l] * local_gweight_l))
+        return torch.nn.ParameterList(line_coef).to(self.device)
+
+
     # def init_angle_svd(self, n_component, local_dim, dimpos, scale, device, lvl):
     #     angle_coef = []
     #     for l in range(lvl):
@@ -620,10 +653,6 @@ class PointTensorCP_adapt(PointTensorBase_adapt):
                 if len(geo_cluster[i][k_c]) > 3:
                     pca_k = PCA(n_components=3)
                     new_pnts = pca_k.fit_transform(pnts_data) # transformed pnts in new coords
-                    # print(new_pnts + pca_k.mean_ - pnts_data, pca_k.singular_values_, pca_k.components_)
-                    # axis3 = pca_k._fit(pnts_data)
-                    # print(axis3)
-                    # exit()
                     # pnts_denorm = new_pnts * np.array([pnts_data[:,0].max()-pnts_data[:,0].min(), pnts_data[:,1].max()-pnts_data[:,1].min(), pnts_data[:,2].max()-pnts_data[:,2].min()]) + np.array([pnts_data[:,0].min(), pnts_data[:,1].min(), pnts_data[:,2].min()])
 
                     cluster_raw_mean[i][k_c] = pca_k.mean_
@@ -637,7 +666,7 @@ class PointTensorCP_adapt(PointTensorBase_adapt):
                     stds[i][k_c].append(np.std(new_pnts, axis=0))
                 pca_cluster_newpnts[i][k_c].append(new_pnts)
                 pca_min, pca_max = np.min(new_pnts, axis=0), np.max(new_pnts, axis=0)
-                pca_cluster_edge_leng[i][k_c, :] = pca_max - pca_min
+                pca_cluster_edge_leng[i][k_c, :] = (pca_max - pca_min) * 1.1
                 if len(pca_axis[i][k_c]) > 0:
                    R_axis[i][k_c] = self.from_rot_2_Euler(pca_axis[i][k_c][0].T)
                 else:
@@ -725,8 +754,6 @@ class PointTensorCP_adapt(PointTensorBase_adapt):
 
         return line_s * line_s_gweight + line_l * line_l_gweight
 
-    # line_coef.append(torch.nn.Parameter(scale * torch.randn((dim_sum_counter[l][i], n_component[l][0]))))
-
     def ind_intrp_line_map_batch_prod(self, density_lines, local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, tensoRF_id):
         return (density_lines[0][local_gindx_s[..., 0], :] * local_gweight_s[:, 0:1] + density_lines[0][local_gindx_l[..., 0], :] * local_gweight_l[:, 0:1]) *  (density_lines[1][local_gindx_s[..., 1], :] * local_gweight_s[:, 1:2] + density_lines[1][local_gindx_l[..., 1], :] * local_gweight_l[:, 1:2]) * (density_lines[2][local_gindx_s[..., 2], :] * local_gweight_s[:, 2:3] + density_lines[2][local_gindx_l[..., 2], :] * local_gweight_l[:, 2:3])
 
@@ -735,28 +762,36 @@ class PointTensorCP_adapt(PointTensorBase_adapt):
     #     b_inds = torch.zeros([len(local_gindx_s)], device=density_line.device, dtype=torch.int64)
     #     return density_line[b_inds, :, local_gindx_s] * local_gweight_s[:, None] + density_line[b_inds, :, local_gindx_l] * local_gweight_l[:, None]
 
-    @torch.no_grad()
-    def up_sampling_Vector(self, density_line_coef, app_line_coef, theta_line_coef, phi_line_coef, res_target):
-        for l in range(self.lvl):
-            for i in range(3):
-                density_line_coef[3*l+i] = torch.nn.Parameter(
-                    F.interpolate(density_line_coef[3*l+i].data, size=(res_target[l][i]+1), mode='linear', align_corners=True))
-                app_line_coef[3*l+i] = torch.nn.Parameter(
-                    F.interpolate(app_line_coef[3*l+i].data, size=(res_target[l][i]+1), mode='linear', align_corners=True))
-            if len(self.local_dims[0]) > 3:
-                print("no implementation")
-                exit()
+    # @torch.no_grad()
+    # def up_sampling_Vector(self, density_line_coef, app_line_coef, theta_line_coef, phi_line_coef, res_target):
+    #     for l in range(self.lvl):
+    #         for i in range(3):
+    #             density_line_coef[3*l+i] = torch.nn.Parameter(
+    #                 F.interpolate(density_line_coef[3*l+i].data, size=(res_target[l][i]+1), mode='linear', align_corners=True))
+    #             app_line_coef[3*l+i] = torch.nn.Parameter(
+    #                 F.interpolate(app_line_coef[3*l+i].data, size=(res_target[l][i]+1), mode='linear', align_corners=True))
+    #         if len(self.local_dims[0]) > 3:
+    #             print("no implementation")
+    #             exit()
+    #
+    #     return density_line_coef, app_line_coef, theta_line_coef, phi_line_coef
 
-        return density_line_coef, app_line_coef, theta_line_coef, phi_line_coef
+    @torch.no_grad()
+    def up_sampling_Vector(self, density_line_coef, app_line_coef, theta_line_coef, phi_line_coef, local_range, local_dims):
+        self.density_line = self.upsample_one_svd(density_line_coef, local_range, local_dims)
+        self.app_line = self.upsample_one_svd(app_line_coef, local_range, local_dims)
+        self.cal_cumsum_vec(local_dims)
 
     @torch.no_grad()
-    def upsample_volume_grid(self, res_target, reset_feat=False):
-        print(f'upsamping to local dims: {self.local_dims} to {res_target}')
-        self.local_dims = torch.as_tensor(res_target, device=self.local_dims.device, dtype=self.local_dims.dtype)
+    def upsample_volume_grid(self, reset_feat=False):
+        print(f'upsamping to local dims by local unit')
+        local_range, local_dims = self.set_local_range_dim(self.geo_xyz, self.pca_cluster_edge_leng, None, None, None, None, self.stds)
+
         if reset_feat:
-            self.init_svd_volume(self.local_dims, self.local_dims.device, init=False)
+            self.init_svd_volume(local_dims, self.device, init=False)
         else:
-            self.up_sampling_Vector(self.density_line, self.app_line, self.theta_line, self.phi_line, res_target)
+            self.up_sampling_Vector(self.density_line, self.app_line, self.theta_line, self.phi_line, local_range, local_dims)
+        self.local_range, self.local_dims = local_range, local_dims
         self.update_stepSize(self.local_dims)
 
 

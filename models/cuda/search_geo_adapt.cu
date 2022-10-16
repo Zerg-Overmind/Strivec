@@ -17,9 +17,8 @@ __global__ void find_pca_tensoRF_and_repos_cuda_kernel(
         scalar_t* __restrict__ xyz_sampled,
         scalar_t* __restrict__ geo_xyz,
         scalar_t* __restrict__ geo_rot,
-        int64_t* __restrict__ final_agg_id,
+        scalar_t* __restrict__ xyz_min,
         int64_t* __restrict__ final_tensoRF_id,
-        scalar_t* __restrict__ local_range,
         int16_t* __restrict__ local_dims,
         int64_t* __restrict__ local_gindx_s,
         int64_t* __restrict__ local_gindx_l,
@@ -27,90 +26,86 @@ __global__ void find_pca_tensoRF_and_repos_cuda_kernel(
         scalar_t* __restrict__ local_gweight_l,
         scalar_t* __restrict__ local_kernel_dist,
         scalar_t* __restrict__ units,
+        scalar_t* __restrict__ local_range,
+        int32_t* __restrict__ tensoRF_cvrg_inds,
+        int8_t* __restrict__ tensoRF_count,
         int16_t* __restrict__ tensoRF_topindx,
         int32_t* __restrict__ dim_cumsum_counter,
-        int32_t* __restrict__ cvrg_inds,
-        int32_t* __restrict__ cvrg_cumsum,
-        int32_t* __restrict__ cvrg_count,
-        const int cvrg_len,
+        bool* __restrict__ tensoRF_mask,
+        const int gridX,
+        const int gridY,
+        const int gridZ,
+        const int n_sampleK,
+        const int K,
         const int maxK
         ) {
   const int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if(idx < cvrg_len) {
-    const int i_agg = final_agg_id[idx];
-    const int tensoRF_shift = idx - ((i_agg!=0) ? cvrg_cumsum[i_agg-1] : 0);
-    const int cvrg_ind = cvrg_inds[i_agg];
-    const int i_tid = tensoRF_topindx[cvrg_ind * maxK + tensoRF_shift];
-    final_tensoRF_id[idx] = i_tid;
-    const int offset_a = i_agg * 3;
-    const int offset_t = i_tid * 3;
-    const int offset_r = i_tid * 9;
-    const int offset_p = idx * 3;
+  if(idx < n_sampleK) {
+    const int sample_id = idx / K;
+    const int kid = idx % K;
+    const int xyzshift = sample_id * 3;
+    const float px = xyz_sampled[xyzshift];
+    const float py = xyz_sampled[xyzshift + 1];
+    const float pz = xyz_sampled[xyzshift + 2];
+    const int indx = min(gridX-1, (int)((px - xyz_min[0]) / units[0]));
+    const int indy = min(gridY-1, (int)((py - xyz_min[1]) / units[1]));
+    const int indz = min(gridZ-1, (int)((pz - xyz_min[2]) / units[2]));
+    const int inds = indx * gridY * gridZ + indy * gridZ + indz;
+    const int cvrg_id = tensoRF_cvrg_inds[inds];
+    // printf("tensoRF_count[cvrg_id] %d %d %d %d;   ", kid, (int)tensoRF_count[cvrg_id], K, cvrg_id);
+    if (kid < tensoRF_count[cvrg_id]){
+        const int i_tid = tensoRF_topindx[cvrg_id * maxK + kid];
+        final_tensoRF_id[idx] = i_tid;
+        const int offset_t = i_tid * 3;
+        const int offset_r = i_tid * 9;
 
-    const float px = xyz_sampled[offset_a];
-    const float py = xyz_sampled[offset_a + 1];
-    const float pz = xyz_sampled[offset_a + 2];
+        const float rel_x = px - geo_xyz[offset_t];
+        const float rel_y = py - geo_xyz[offset_t+1];
+        const float rel_z = pz - geo_xyz[offset_t+2];
 
-    const float rel_x = px - geo_xyz[offset_t];
-    const float rel_y = py - geo_xyz[offset_t+1];
-    const float rel_z = pz - geo_xyz[offset_t+2];
+        const float rx = rel_x * geo_rot[offset_r] + rel_y * geo_rot[offset_r+3]  + rel_z * geo_rot[offset_r+6];
 
-    const float rx = rel_x * geo_rot[offset_r] + rel_y * geo_rot[offset_r+3]  + rel_z * geo_rot[offset_r+6];
-    const float ry = rel_x * geo_rot[offset_r+1] + rel_y * geo_rot[offset_r+4]  + rel_z * geo_rot[offset_r+7];
-    const float rz = rel_x * geo_rot[offset_r+2] + rel_y * geo_rot[offset_r+5]  + rel_z * geo_rot[offset_r+8];
+        const float ry = rel_x * geo_rot[offset_r+1] + rel_y * geo_rot[offset_r+4]  + rel_z * geo_rot[offset_r+7];
 
-    // if (abs(rx) < local_range[offset_t] && abs(ry) < local_range[offset_t+1] && abs(rz) < local_range[offset_t+2]){
-    local_kernel_dist[idx] = sqrt(rx * rx + ry * ry + rz * rz);
+        const float rz = rel_x * geo_rot[offset_r+2] + rel_y * geo_rot[offset_r+5]  + rel_z * geo_rot[offset_r+8];
 
-    const float softindx = (rx + local_range[offset_t]) / units[0];
-    const float softindy = (ry + local_range[offset_t+1]) / units[1];
-    const float softindz = (rz + local_range[offset_t+2]) / units[2];
+        if (abs(rx) <= local_range[offset_t] && abs(ry) <= local_range[offset_t+1] && abs(rz) <= local_range[offset_t+2]){
+            const int offset_p = idx * 3;
+            tensoRF_mask[idx] = true;
+            local_kernel_dist[idx] = sqrt(rx * rx + ry * ry + rz * rz);
 
-    int indlx = min(max((int)softindx, 0), local_dims[offset_t]-1);
-    int indly = min(max((int)softindy, 0), local_dims[offset_t+1]-1);
-    int indlz = min(max((int)softindz, 0), local_dims[offset_t+2]-1);
+            const float softindx = (rx + local_range[offset_t]) / units[0];
+            const float softindy = (ry + local_range[offset_t+1]) / units[1];
+            const float softindz = (rz + local_range[offset_t+2]) / units[2];
 
-    const float res_x = softindx - indlx;
-    const float res_y = softindy - indly;
-    const float res_z = softindz - indlz;
+            int indlx = min(max((int)softindx, 0), local_dims[offset_t]-1);
+            int indly = min(max((int)softindy, 0), local_dims[offset_t+1]-1);
+            int indlz = min(max((int)softindz, 0), local_dims[offset_t+2]-1);
 
-    indlx = indlx + dim_cumsum_counter[offset_t];
-    indly = indly + dim_cumsum_counter[offset_t + 1];
-    indlz = indlz + dim_cumsum_counter[offset_t + 2];
+            const float res_x = softindx - indlx;
+            const float res_y = softindy - indly;
+            const float res_z = softindz - indlz;
 
+            indlx = indlx + dim_cumsum_counter[offset_t];
+            indly = indly + dim_cumsum_counter[offset_t + 1];
+            indlz = indlz + dim_cumsum_counter[offset_t + 2];
 
-    local_gweight_s[offset_p  ] = 1 - res_x;
-    local_gweight_s[offset_p+1] = 1 - res_y;
-    local_gweight_s[offset_p+2] = 1 - res_z;
-    local_gweight_l[offset_p  ] = res_x;
-    local_gweight_l[offset_p+1] = res_y;
-    local_gweight_l[offset_p+2] = res_z;
+            local_gweight_s[offset_p  ] = 1 - res_x;
+            local_gweight_s[offset_p+1] = 1 - res_y;
+            local_gweight_s[offset_p+2] = 1 - res_z;
+            local_gweight_l[offset_p  ] = res_x;
+            local_gweight_l[offset_p+1] = res_y;
+            local_gweight_l[offset_p+2] = res_z;
 
-    local_gindx_s[offset_p  ] = indlx;
-    local_gindx_s[offset_p+1] = indly;
-    local_gindx_s[offset_p+2] = indlz;
-    local_gindx_l[offset_p  ] = indlx + 1;
-    local_gindx_l[offset_p+1] = indly + 1;
-    local_gindx_l[offset_p+2] = indlz + 1;
-    //}
-  }
-}
-
-
-__global__ void __fill_agg_id(
-        int32_t* __restrict__ cvrg_count,
-        int32_t* __restrict__ cvrg_cumsum,
-        int64_t* __restrict__ final_agg_id,
-        const int n_sample) {
-    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if(idx<n_sample) {
-        const int cur_agg_start = (idx!=0) ? cvrg_cumsum[idx-1] : 0;
-        const int cur_agg_end = cvrg_cumsum[idx];
-        // if (cur_agg_start==cur_agg_end) printf(" cur_agg_start=cur_agg_end %d ", cur_agg_end);
-        for (int i = cur_agg_start; i < cur_agg_end; i++){
-            final_agg_id[i] = idx;
+            local_gindx_s[offset_p  ] = indlx;
+            local_gindx_s[offset_p+1] = indly;
+            local_gindx_s[offset_p+2] = indlz;
+            local_gindx_l[offset_p  ] = indlx + 1;
+            local_gindx_l[offset_p+1] = indly + 1;
+            local_gindx_l[offset_p+2] = indlz + 1;
         }
     }
+  }
 }
 
 template <typename scalar_t>
@@ -141,6 +136,24 @@ __global__ void count_tensoRF_cvrg_cuda_kernel(
   }
 }
 
+
+
+
+__global__ void __fill_agg_id(
+        int64_t* __restrict__ cvrg_count,
+        int64_t* __restrict__ cvrg_cumsum,
+        int64_t* __restrict__ final_agg_id,
+        const int n_sample) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx<n_sample) {
+        const int cur_agg_start = (idx!=0) ? cvrg_cumsum[idx-1] : 0;
+        const int cur_agg_end = cvrg_cumsum[idx];
+        // if (cur_agg_start==cur_agg_end) printf(" cur_agg_start=cur_agg_end %d ", cur_agg_end);
+        for (int i = cur_agg_start; i < cur_agg_end; i++){
+            final_agg_id[i] = idx;
+        }
+    }
+}
 
 
 template <typename scalar_t>
@@ -406,64 +419,52 @@ std::vector<torch::Tensor> sample_2_rot_cubic_tensoRF_cvrg_cuda(torch::Tensor xy
   const int gridY = tensoRF_cvrg_inds.size(1);
   const int gridZ = tensoRF_cvrg_inds.size(2);
 
-  auto cvrg_inds = torch::empty({n_sample}, torch::dtype(torch::kInt32).device(torch::kCUDA));
-  auto cvrg_count = torch::zeros({n_sample}, torch::dtype(torch::kInt32).device(torch::kCUDA));
+  const int n_sampleK = n_sample * K;
+  auto local_gindx_s = torch::empty({n_sampleK, 3}, torch::dtype(torch::kInt64).device(torch::kCUDA));
+  auto local_gindx_l = torch::empty({n_sampleK, 3}, torch::dtype(torch::kInt64).device(torch::kCUDA));
+  auto local_gweight_s = torch::empty({n_sampleK, 3}, torch::dtype(xyz_sampled.dtype()).device(torch::kCUDA));
+  auto local_gweight_l = torch::empty({n_sampleK, 3}, torch::dtype(xyz_sampled.dtype()).device(torch::kCUDA));
+  auto local_kernel_dist = torch::empty({n_sampleK}, torch::dtype(xyz_sampled.dtype()).device(torch::kCUDA));
+  auto final_tensoRF_id = torch::empty({n_sampleK}, torch::dtype(torch::kInt64).device(torch::kCUDA));
+  auto tensoRF_mask = torch::zeros({n_sample, K}, torch::dtype(torch::kBool).device(torch::kCUDA));
 
-  AT_DISPATCH_FLOATING_TYPES(xyz_sampled.type(), "count_tensoRF_cvrg_cuda", ([&] {
-    count_tensoRF_cvrg_cuda_kernel<scalar_t><<<(n_sample+threads-1)/threads, threads>>>(
+  AT_DISPATCH_FLOATING_TYPES(xyz_sampled.type(), "find_pca_tensoRF_and_repos_cuda_kernel", ([&] {
+      find_pca_tensoRF_and_repos_cuda_kernel<scalar_t><<<(n_sampleK+threads-1)/threads, threads>>>(
         xyz_sampled.data<scalar_t>(),
+        geo_xyz.data<scalar_t>(),
+        geo_rot.data<scalar_t>(),
         xyz_min.data<scalar_t>(),
+        final_tensoRF_id.data<int64_t>(),
+        local_dims.data<int16_t>(),
+        local_gindx_s.data<int64_t>(),
+        local_gindx_l.data<int64_t>(),
+        local_gweight_s.data<scalar_t>(),
+        local_gweight_l.data<scalar_t>(),
+        local_kernel_dist.data<scalar_t>(),
         units.data<scalar_t>(),
-        tensoRF_count.data<int8_t>(),
+        local_range.data<scalar_t>(),
         tensoRF_cvrg_inds.data<int32_t>(),
-        cvrg_inds.data<int32_t>(),
-        cvrg_count.data<int32_t>(),
-        gridY * gridZ,
+        tensoRF_count.data<int8_t>(),
+        tensoRF_topindx.data<int16_t>(),
+        dim_cumsum_counter.data<int32_t>(),
+        tensoRF_mask.data<bool>(),
+        gridX,
+        gridY,
         gridZ,
-        n_sample);
+        n_sampleK,
+        K,
+        maxK);
   }));
 
-  auto cvrg_cumsum = cvrg_count.cumsum(0, torch::kInt32);
+  auto cvrg_count = tensoRF_mask.sum(1);
+  auto cvrg_cumsum = cvrg_count.cumsum(0);
   const int cvrg_len = cvrg_count.sum().item<int>();
 
-  auto final_tensoRF_id = torch::empty({cvrg_len}, torch::dtype(torch::kInt64).device(torch::kCUDA));
   auto final_agg_id = torch::empty({cvrg_len}, torch::dtype(torch::kInt64).device(torch::kCUDA));
 
-  auto local_gindx_s = torch::empty({cvrg_len, 3}, torch::dtype(torch::kInt64).device(torch::kCUDA));
-  auto local_gindx_l = torch::empty({cvrg_len, 3}, torch::dtype(torch::kInt64).device(torch::kCUDA));
-  auto local_gweight_s = torch::empty({cvrg_len, 3}, torch::dtype(xyz_sampled.dtype()).device(torch::kCUDA));
-  auto local_gweight_l = torch::empty({cvrg_len, 3}, torch::dtype(xyz_sampled.dtype()).device(torch::kCUDA));
-  auto local_kernel_dist = torch::empty({cvrg_len}, torch::dtype(xyz_sampled.dtype()).device(torch::kCUDA));
-  if (cvrg_len > 0){
-      __fill_agg_id<<<(n_sample+threads-1)/threads, threads>>>(cvrg_count.data<int32_t>(), cvrg_cumsum.data<int32_t>(), final_agg_id.data<int64_t>(), n_sample);
-      // torch::cuda::synchronize();
-      if (KNN) {
-          AT_DISPATCH_FLOATING_TYPES(xyz_sampled.type(), "find_pca_tensoRF_and_repos_cuda_kernel", ([&] {
-            find_pca_tensoRF_and_repos_cuda_kernel<scalar_t><<<(cvrg_len+threads-1)/threads, threads>>>(
-                xyz_sampled.data<scalar_t>(),
-                geo_xyz.data<scalar_t>(),
-                geo_rot.data<scalar_t>(),
-                final_agg_id.data<int64_t>(),
-                final_tensoRF_id.data<int64_t>(),
-                local_range.data<scalar_t>(),
-                local_dims.data<int16_t>(),
-                local_gindx_s.data<int64_t>(),
-                local_gindx_l.data<int64_t>(),
-                local_gweight_s.data<scalar_t>(),
-                local_gweight_l.data<scalar_t>(),
-                local_kernel_dist.data<scalar_t>(),
-                units.data<scalar_t>(),
-                tensoRF_topindx.data<int16_t>(),
-                dim_cumsum_counter.data<int32_t>(),
-                cvrg_inds.data<int32_t>(),
-                cvrg_cumsum.data<int32_t>(),
-                cvrg_count.data<int32_t>(),
-                cvrg_len,
-                maxK);
-           }));
-       }
-  }
+  __fill_agg_id<<<(n_sample+threads-1)/threads, threads>>>(cvrg_count.data<int64_t>(), cvrg_cumsum.data<int64_t>(), final_agg_id.data<int64_t>(), n_sample);
   // torch::cuda::synchronize();
-  return {local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, final_tensoRF_id, final_agg_id};
+
+  return {tensoRF_mask.reshape(-1), local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, final_tensoRF_id, final_agg_id};
 }
 

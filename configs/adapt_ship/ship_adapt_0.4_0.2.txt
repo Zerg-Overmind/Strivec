@@ -32,7 +32,7 @@ max_tensoRF = [2, 2]
 rot_init = [0, 0, 0]
 
 N_vis = 5
-vis_every = 1000
+vis_every = 2000
 
 render_test = 1
 
@@ -58,8 +58,8 @@ ray_type=2
 skip_zero_grad=1
 gpu_ids="1"
 vox_res = 320
-vox_range=[0.4, 0.4, 0.4, 0.2, 0.2, 0.2]
-vox_center=[1,0]
+vox_range= [0.4, 0.4, 0.4] #[0.4, 0.4, 0.4, 0.2, 0.2, 0.2]
+vox_center= [1] #[1,0]
 
 
 use_geo = 1 # -1 for dvgo

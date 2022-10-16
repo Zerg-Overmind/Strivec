@@ -149,11 +149,6 @@ def reconstruction(args, geo, train_dataset, test_dataset, pnts, grid_idx_lst, i
         print("no implementation!!!")
         exit()
 
-    if args.upsamp_list is not None:
-        local_dim_list = torch.stack(dim_lst, dim=1).tolist()
-    else:
-        local_dim_list = None
-
     torch.cuda.empty_cache()
     PSNRs,PSNRs_test = [],[0]
 
@@ -186,7 +181,7 @@ def reconstruction(args, geo, train_dataset, test_dataset, pnts, grid_idx_lst, i
     cur_rot_step = False
     rot_step = args.rot_step
     upsamp_reset_list = args.upsamp_reset_list if args.upsamp_reset_list is not None else [0 for i in range(len(args.upsamp_list))]
-
+    up_stage=0 # stage of upsampling the tensorf grid
     adapt_lvl = 0
     for iteration in pbar:
         ray_idx = trainingSampler.nextids()
@@ -306,9 +301,10 @@ def reconstruction(args, geo, train_dataset, test_dataset, pnts, grid_idx_lst, i
             adapt_lvl += 1
             
         if args.upsamp_list is not None and iteration in args.upsamp_list:
-            local_dims = local_dim_list.pop(0)
+            up_stage+=1
             reset = upsamp_reset_list.pop(0) > 0
-            tensorf.upsample_volume_grid(local_dims, reset_feat=reset)
+            tensorf.up_stage = up_stage
+            tensorf.upsample_volume_grid(reset_feat=reset)
 
             if args.lr_upsample_reset:
                 print("reset lr to initial")
