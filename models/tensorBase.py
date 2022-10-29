@@ -125,11 +125,6 @@ class TensorBase(torch.nn.Module):
     def save(self, path):
         kwargs = self.get_kwargs()
         ckpt = {'kwargs': kwargs, 'state_dict': self.state_dict()}
-        if self.alphaMask is not None:
-            alpha_volume = self.alphaMask.alpha_volume.bool().cpu().numpy()
-            ckpt.update({'alphaMask.shape':alpha_volume.shape})
-            ckpt.update({'alphaMask.mask':np.packbits(alpha_volume.reshape(-1))})
-            ckpt.update({'alphaMask.aabb': self.alphaMask.aabb.cpu()})
         torch.save(ckpt, path)
         print("state_dict", ckpt["state_dict"].keys())
         size = os.path.getsize(path) / 1024.0 / 1024.0

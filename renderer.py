@@ -104,9 +104,6 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
             imageio.imwrite(f'{savePath}/{prtx}{idx:03d}.png', rgb_map)
             rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.png', rgb_map)
-    if img_eval_interval == 1:
-        imageio.mimwrite(f'{savePath}/{prtx}video.mp4', np.stack(rgb_maps), fps=30, quality=10)
-        imageio.mimwrite(f'{savePath}/{prtx}depthvideo.mp4', np.stack(depth_maps), fps=30, quality=10)
 
     if PSNRs:
         psnr = np.mean(np.asarray(PSNRs))
@@ -115,8 +112,14 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
             l_a = np.mean(np.asarray(l_alex))
             l_v = np.mean(np.asarray(l_vgg))
             np.savetxt(f'{savePath}/{prtx}mean.txt', np.asarray([psnr, ssim, l_a, l_v]))
+            print(f'{savePath}/{prtx}mean.txt', " psnr:{}, ssim:{}".format(psnr, ssim))
         else:
             np.savetxt(f'{savePath}/{prtx}mean.txt', np.asarray([psnr]))
+            print(f'{savePath}/{prtx}mean.txt', " psnr:{}".format(psnr))
+
+    if img_eval_interval == 1:
+        imageio.mimwrite(f'{savePath}/{prtx}video.mp4', np.stack(rgb_maps), fps=30, quality=10)
+        imageio.mimwrite(f'{savePath}/{prtx}depthvideo.mp4', np.stack(depth_maps), fps=30, quality=10)
 
     return PSNRs
 

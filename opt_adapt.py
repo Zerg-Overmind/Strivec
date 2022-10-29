@@ -18,7 +18,7 @@ def config_parser(cmd=None):
                         help='input data directory')
     parser.add_argument("--pointfile", type=str, default='./log/den_prefix',
                         help='input data directory')
-    parser.add_argument("--pretrained_mvs_ckpt", type=str, default="/home/xharlie/user_space/codes/MVSNet/model_000014.ckpt",
+    parser.add_argument("--pretrained_mvs_ckpt", type=str, default="/home/xharlie/dev/cloud_tensoRF/log/MVSNet/model_000014.ckpt",
                         help='checkpoints of the pretrained_mvs network')
     parser.add_argument("--progress_refresh_rate", type=int, default=10,
                         help='how many iterations to show psnrs or iters')
@@ -77,6 +77,14 @@ def config_parser(cmd=None):
         type=float,
         nargs='+',
         default=(0.1, 0.1, 0.1),
+        help='local tensoRF half range'
+    )
+
+    parser.add_argument(
+        '--dilation_ratio',
+        type=float,
+        nargs='+',
+        default=(1.0, 1.0),
         help='local tensoRF half range'
     )
     parser.add_argument(
@@ -262,7 +270,9 @@ def config_parser(cmd=None):
 
 
     parser.add_argument("--ckpt", type=str, default=None,
-                        help='specific weights npy file to reload for coarse network')
+                        help='specific weights npy file to reload')
+    parser.add_argument("--info_ckpt", type=str, default=None,
+                        help='specific tensorf info pickle file to reload')
     parser.add_argument("--render_only", type=int, default=0)
     parser.add_argument("--render_test", type=int, default=0)
     parser.add_argument("--render_train", type=int, default=0)
@@ -290,11 +300,12 @@ def config_parser(cmd=None):
     parser.add_argument("--shrink_list", type=int, default=None, action="append", help="list of iterations to shrink the scene box")
 
     parser.add_argument("--filter_ray_list", type=int, default=None, action="append", help="list of iterations to filter the ray that has no cross to object")
-    parser.add_argument("--update_AlphaMask_list", type=int, action="append", help="list of iterations to udate alpha mask to skip computation of shading")
-
-    parser.add_argument('--idx_view',
-                        type=int,
-                        default=0)
+    parser.add_argument("--update_AlphaMask_list", type=int, action="append", help="list of iterations to update alpha mask to skip computation of shading")
+    parser.add_argument("--rmv_unused_list", type=int, action="append", default=None, help="list of iterations to remove tensorfs which r always behind others")
+    parser.add_argument("--rmv_unused_ord_thresh", type=int, action="append", default=None, help="ordinal threshold of removing tensorf which r always behind others")
+    parser.add_argument('--cluster_method', type=str, action="append",  default=None, help="clustering method, in None, use voxel to cluster")
+    parser.add_argument('--cluster_num', type=int, action="append", default=None)
+    parser.add_argument('--idx_view', type=int, default=0)
     # logging/saving options
     parser.add_argument("--N_vis", type=int, default=5,
                         help='N images to vis')

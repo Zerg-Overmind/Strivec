@@ -2,7 +2,7 @@ import os, sys, copy, glob, json, time, random, argparse
 from shutil import copyfile
 from tqdm import tqdm, trange
 
-import mmcv
+# import mmcv
 import imageio
 import numpy as np
 
@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from . import utils, dvgo
 # from lib.load_data import load_data
 
-from torch_efficient_distloss import flatten_eff_distloss
+# from torch_efficient_distloss import flatten_eff_distloss
 sys.path.append("dataLoader/")
 from ray_utils import SimpleSampler
 

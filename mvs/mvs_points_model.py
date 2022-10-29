@@ -184,6 +184,7 @@ class MvsPointsModel(nn.Module):
         # depth_values: 1, 128
         photometric_confidence_lst=[]
         cam_xyz_lst = []
+        xyz_color_lst = []
         nearfar_mask_lst = []
         volume_prob = None
         # w2c_ref = batch["w2cs"][:, self.args.ref_vid, ...].transpose(1, 2)
@@ -195,7 +196,7 @@ class MvsPointsModel(nn.Module):
         depth_values = (depth_min + torch.arange(0, 192, device="cuda", dtype=torch.float32) * depth_interval)[None, :]
         dimgs = batch["mvs_images"] if "mvs_images" in batch else imgs
         bmvs_2d_features=None
-        # print("dimgs",dimgs.shape)
+        # print("dimgs",dimgs.shape) # [1, 3, 3, 800, 800]
         bimgs = dimgs[:, :init_view_num].expand(len(depth_vid), -1, -1, -1, -1)
         bvid = torch.as_tensor(depth_vid, dtype=torch.long, device="cuda")
         bproj_mats = proj_mats[0, bvid, ...]
@@ -211,25 +212,27 @@ class MvsPointsModel(nn.Module):
         photometric_confidence = torch.nn.functional.interpolate(photometric_confidence, size=list(dimgs.shape)[-2:], mode='nearest')  # 1, 1, H, W
         photometric_confidence_lst = torch.unbind(photometric_confidence[:,None,...], dim=0)
         bndc_std_depth = torch.ones_like(bcam_expected_depth) * manual_std_depth
+        # print(bimgs.shape, batch["intrinsics"].shape) # torch.Size([1, 3, 3, 800, 800]) torch.Size([1, 3, 3, 3])
         for i in range(len(depth_vid)):
             vid = depth_vid[i]
             cam_expected_depth, ndc_std_depth = bcam_expected_depth[i:i+1], bndc_std_depth[i:i+1]
             ndc_xyz, cam_xyz, HDWD, nearfar_mask = self.sample_func(volume_prob, self.args, batch["intrinsics"][:, vid,...], near_fars[0, vid], cam_expected_depth=cam_expected_depth, ndc_std_depth=ndc_std_depth)
             if cam_xyz.shape[1] > 0:
+                # cam_xyz torch.Size([1, 1, 1, 800, 800, 3])
+                # print("imgs", imgs.shape) # ([1, 3, 3, 800, 800])
+                xyz_color_lst.append(imgs[0, 0, ...])
                 cam_xyz_lst.append(cam_xyz)
                 nearfar_mask_lst.append(nearfar_mask)
-        return cam_xyz_lst, photometric_confidence_lst, nearfar_mask_lst, HDWD, data_mvs, [batch["intrinsics"][:,int(vid),...] for vid in depth_vid], [batch["w2cs"][:,int(vid),...] for vid in depth_vid]
-
+        return cam_xyz_lst, xyz_color_lst, photometric_confidence_lst, nearfar_mask_lst, HDWD, data_mvs, [batch["intrinsics"][:,int(vid),...] for vid in depth_vid], [batch["w2cs"][:,int(vid),...] for vid in depth_vid]
 
 
 
     def forward(self, batch):
         # 3 , 3, 3, 2, 4, dict, 3, 3
 
-        cam_xyz_lst, photometric_confidence_lst, nearfar_mask_lst, HDWD, data_mvs, intrinsics_lst, extrinsics_lst  = self.gen_points(batch)
+        cam_xyz_lst, _, photometric_confidence_lst, nearfar_mask_lst, HDWD, data_mvs, intrinsics_lst, extrinsics_lst  = self.gen_points(batch)
         # #################### FILTER by Masks ##################
         gpu_filter = True
-
         if self.args.manual_depth_view != 0:
             # cuda filter
             if gpu_filter:
@@ -244,7 +247,7 @@ class MvsPointsModel(nn.Module):
             cam_xyz_lst = [cam_xyz[nearfar_mask[0,...], :] for cam_xyz, nearfar_mask in zip(cam_xyz_lst, nearfar_mask_lst)]
             # print("after filterd", cam_xyz_lst[0].shape)
             photometric_confidence_lst = [torch.ones_like(cam_xyz[...,0]) for cam_xyz in cam_xyz_lst]
-
+        print("get_image_features")
         img_feats = self.get_image_features(batch['images'])
 
         points_features_lst = [self.query_embedding(HDWD, torch.as_tensor(cam_xyz_lst[i][None, ...], device="cuda", dtype=torch.float32), photometric_confidence_lst[i][None, ..., None], img_feats, data_mvs['c2ws'], data_mvs['w2cs'], batch["intrinsics"], int(self.args.depth_vid[i]), pointdir_w=False) for i in range(len(cam_xyz_lst))]

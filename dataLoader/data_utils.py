@@ -1,5 +1,5 @@
 import numpy as np
-import open3d as o3d
+# import open3d as o3d
 def get_cv_raydir(pixelcoords, height, width, focal, rot):
     # pixelcoords: H x W x 2
     if isinstance(focal, float):
@@ -80,42 +80,42 @@ def flip_z(poses):
     return np.matmul(poses, z_flip_matrix[None,...])
 
 
-def triangluation_bpa(pnts, test_pnts=None, full_comb=False):
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(pnts[:, :3])
-    pcd.normals = o3d.utility.Vector3dVector(pnts[:, :3] / np.linalg.norm(pnts[:, :3], axis=-1, keepdims=True))
-
-    # pcd.colors = o3d.utility.Vector3dVector(pnts[:, 3:6] / 255)
-    # pcd.normals = o3d.utility.Vector3dVector(pnts[:, 6:9])
-    # o3d.visualization.draw_geometries([pcd])
-
-    distances = pcd.compute_nearest_neighbor_distance()
-    avg_dist = np.mean(distances)
-
-
-    radius = 3 * avg_dist
-    dec_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(pcd, o3d.utility.DoubleVector(
-        [radius, radius * 2]))
-    # dec_mesh = dec_mesh.simplify_quadric_decimation(100000)
-    # dec_mesh.remove_degenerate_triangles()
-    # dec_mesh.remove_duplicated_triangles()
-    # dec_mesh.remove_duplicated_vertices()
-    # dec_mesh.remove_non_manifold_edges()
-
-    # vis_lst = [dec_mesh, pcd]
-    # vis_lst = [dec_mesh, pcd]
-    # o3d.visualization.draw_geometries(vis_lst)
-    # if test_pnts is not None :
-    #     tpcd = o3d.geometry.PointCloud()
-    #     print("test_pnts",test_pnts.shape)
-    #     tpcd.points = o3d.utility.Vector3dVector(test_pnts[:, :3])
-    #     tpcd.normals = o3d.utility.Vector3dVector(test_pnts[:, :3] / np.linalg.norm(test_pnts[:, :3], axis=-1, keepdims=True))
-    #     o3d.visualization.draw_geometries([dec_mesh, tpcd] )
-    triangles = np.asarray(dec_mesh.triangles, dtype=np.int32)
-    if full_comb:
-        q, w, e = triangles[..., 0], triangles[..., 1], triangles[..., 2]
-        triangles2 = np.stack([w,q,e], axis=-1)
-        triangles3 = np.stack([e,q,w], axis=-1)
-        triangles = np.concatenate([triangles, triangles2, triangles3], axis=0)
-    return triangles
+# def triangluation_bpa(pnts, test_pnts=None, full_comb=False):
+#     pcd = o3d.geometry.PointCloud()
+#     pcd.points = o3d.utility.Vector3dVector(pnts[:, :3])
+#     pcd.normals = o3d.utility.Vector3dVector(pnts[:, :3] / np.linalg.norm(pnts[:, :3], axis=-1, keepdims=True))
+#
+#     # pcd.colors = o3d.utility.Vector3dVector(pnts[:, 3:6] / 255)
+#     # pcd.normals = o3d.utility.Vector3dVector(pnts[:, 6:9])
+#     # o3d.visualization.draw_geometries([pcd])
+#
+#     distances = pcd.compute_nearest_neighbor_distance()
+#     avg_dist = np.mean(distances)
+#
+#
+#     radius = 3 * avg_dist
+#     dec_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(pcd, o3d.utility.DoubleVector(
+#         [radius, radius * 2]))
+#     # dec_mesh = dec_mesh.simplify_quadric_decimation(100000)
+#     # dec_mesh.remove_degenerate_triangles()
+#     # dec_mesh.remove_duplicated_triangles()
+#     # dec_mesh.remove_duplicated_vertices()
+#     # dec_mesh.remove_non_manifold_edges()
+#
+#     # vis_lst = [dec_mesh, pcd]
+#     # vis_lst = [dec_mesh, pcd]
+#     # o3d.visualization.draw_geometries(vis_lst)
+#     # if test_pnts is not None :
+#     #     tpcd = o3d.geometry.PointCloud()
+#     #     print("test_pnts",test_pnts.shape)
+#     #     tpcd.points = o3d.utility.Vector3dVector(test_pnts[:, :3])
+#     #     tpcd.normals = o3d.utility.Vector3dVector(test_pnts[:, :3] / np.linalg.norm(test_pnts[:, :3], axis=-1, keepdims=True))
+#     #     o3d.visualization.draw_geometries([dec_mesh, tpcd] )
+#     triangles = np.asarray(dec_mesh.triangles, dtype=np.int32)
+#     if full_comb:
+#         q, w, e = triangles[..., 0], triangles[..., 1], triangles[..., 2]
+#         triangles2 = np.stack([w,q,e], axis=-1)
+#         triangles3 = np.stack([e,q,w], axis=-1)
+#         triangles = np.concatenate([triangles, triangles2, triangles3], axis=0)
+#     return triangles
 

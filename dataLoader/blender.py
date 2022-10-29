@@ -20,7 +20,7 @@ class BlenderDataset(Dataset):
         self.img_wh = (int(800/downsample),int(800/downsample))
         self.define_transforms()
 
-        self.scene_bbox = torch.tensor([[-1.5, -1.5, -1.5], [1.5, 1.5, 1.5]])
+        self.scene_bbox = torch.tensor([[-1.5, -1.5, -1.5], [1.5, 1.5, 1.5]]) if args.ranges[0] < -99.00 else torch.tensor([args.ranges[:3], args.ranges[3:]])
         self.blender2opencv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
         self.read_meta()
         self.define_proj_mat()
@@ -87,7 +87,7 @@ class BlenderDataset(Dataset):
             img = Image.open(image_path)
             
             if self.downsample!=1.0:
-                img = img.resize(self.img_wh, Image.LANCZOS)
+                img = img.resize(self.img_wh, Image.Resampling.LANCZOS)
             img = self.transform(img)  # (4, h, w)
             img = img.view(4, -1).permute(1, 0)  # (h*w, 4) RGBA
             alpha_img = img[:, -1:]
@@ -205,6 +205,7 @@ class BlenderMVSDataset(Dataset):
         self.total = len(self.id_list)
         print("dataset total:", self.split, self.total)
 
+
     def define_transforms(self):
         self.transform = T.ToTensor()
 
@@ -309,7 +310,7 @@ class BlenderMVSDataset(Dataset):
             image_path = os.path.join(self.data_dir,  f"{frame['file_path']}.png")
             self.image_paths += [image_path]
             img = Image.open(image_path)
-            img = img.resize(self.img_wh, Image.LANCZOS)
+            img = img.resize(self.img_wh, Image.Resampling.LANCZOS)
             img = self.transform(img)  # (4, h, w)
             self.depths += [(img[-1:, ...] > 0.1).numpy().astype(np.float32)]
             self.alphas += [img[-1:].numpy().astype(np.float32)]
@@ -372,7 +373,6 @@ class BlenderMVSDataset(Dataset):
         proj_mats = np.stack(proj_mats)
         imgs = np.stack(imgs).astype(np.float32)
         mvs_images = np.stack(mvs_images).astype(np.float32)
-
         depths_h = np.stack(depths_h)
         alphas = np.stack(alphas)
         affine_mat, affine_mat_inv = np.stack(affine_mat), np.stack(affine_mat_inv)

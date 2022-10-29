@@ -79,6 +79,7 @@ def filter_by_masks(cam_xyz_all, intrinsics_all, extrinsics_all, confidence_all,
     xyz_world_lst=[]
     xyz_ref_lst=[]
     confidence_filtered_lst = []
+    final_mask_lst = []
     B, N, H, W, _ = cam_xyz_all[0].shape
     cam_xyz_all = [cam_xyz.reshape(H, W, 3) for cam_xyz in cam_xyz_all]
     count = 0
@@ -113,13 +114,13 @@ def filter_by_masks(cam_xyz_all, intrinsics_all, extrinsics_all, confidence_all,
         xyz_ref = np.concatenate([xy, depth], axis=-1)
         xyz_world = np.matmul(np.concatenate([xyz_ref, np.ones_like(xyz_ref[...,0:1])], axis=-1), np.transpose(np.linalg.inv(ref_extrinsics)))[:,:3]
         confidence_filtered = confidence[final_mask]
-        xyz_world, xyz_ref, confidence_filtered = range_mask_np(xyz_world, xyz_ref, confidence_filtered, opt)
+        xyz_world, xyz_ref, confidence_filtered, final_mask = range_mask_np(xyz_world, xyz_ref, confidence_filtered, opt, final_mask)
 
         xyz_world_lst.append(xyz_world)
         xyz_ref_lst.append(xyz_ref)
         confidence_filtered_lst.append(confidence_filtered)
-
-    return xyz_ref_lst, xyz_world_lst, confidence_filtered_lst
+        final_mask_lst.append(final_mask)
+    return xyz_ref_lst, xyz_world_lst, confidence_filtered_lst, final_mask_lst
 
 def range_mask_lst_np(xyz_world_all, cam_xyz_all, confidence_filtered_lst, opt):
     if opt.ranges[0] > -99.0:
@@ -129,7 +130,7 @@ def range_mask_lst_np(xyz_world_all, cam_xyz_all, confidence_filtered_lst, opt):
     return xyz_world_all, cam_xyz_all, confidence_filtered_lst
 
 
-def range_mask_np(xyz_world, xyz_ref, confidence_filtered, opt):
+def range_mask_np(xyz_world, xyz_ref, confidence_filtered, opt, final_mask):
     # print("range_mask_np")
     if opt.ranges[0] > -99.0:
         ranges = np.asarray(opt.ranges)
@@ -137,10 +138,11 @@ def range_mask_np(xyz_world, xyz_ref, confidence_filtered, opt):
         xyz_world = xyz_world[mask]
         xyz_ref = xyz_ref[mask]
         confidence_filtered = confidence_filtered[mask]
-    return xyz_world, xyz_ref, confidence_filtered
+        final_mask[final_mask] = mask
+    return xyz_world, xyz_ref, confidence_filtered, final_mask
 
 
-def range_mask_torch(xyz_world, xyz_ref, confidence_filtered, opt):
+def range_mask_torch(xyz_world, xyz_ref, confidence_filtered, opt, final_mask):
     # print("range_mask_torch")
     if opt.ranges[0] > -99.0:
         ranges = torch.as_tensor(opt.ranges, device=xyz_world.device, dtype=torch.float32)
@@ -148,7 +150,8 @@ def range_mask_torch(xyz_world, xyz_ref, confidence_filtered, opt):
         xyz_world = xyz_world[mask]
         xyz_ref = xyz_ref[mask]
         confidence_filtered = confidence_filtered[mask]
-    return xyz_world, xyz_ref, confidence_filtered
+        final_mask[final_mask.clone()] = mask
+    return xyz_world, xyz_ref, confidence_filtered, final_mask
 
 
 def reproject_with_depth_gpu(depth_ref, intrinsics_ref, extrinsics_ref, depth_src, intrinsics_src, extrinsics_src):
@@ -222,6 +225,7 @@ def filter_by_masks_gpu(cam_xyz_all, intrinsics_all, extrinsics_all, confidence_
     confidence_filtered_lst = []
     B, N, C, H, W, _ = cam_xyz_all[0].shape
     cam_xyz_all = [cam_xyz.view(C,H,W,3) for cam_xyz in cam_xyz_all]
+    final_mask_lst = []
     for cam_view in tqdm(range(len(cam_xyz_all))) if vis else range(len(cam_xyz_all)):
         near_fars = near_fars_all[cam_view] if near_fars_all is not None else None
 
@@ -260,17 +264,14 @@ def filter_by_masks_gpu(cam_xyz_all, intrinsics_all, extrinsics_all, confidence_
         if opt.default_conf > 1.0:
             confidence_filtered = reassign_conf(confidence_filtered, final_mask, geo_mask_sum, opt.geo_cnsst_num)
 
-
         xyz_world = torch.cat([xyz_cam, torch.ones_like(xyz_cam[...,0:1])], axis=-1) @ torch.inverse(cam_extrinsics).transpose(0,1)
         # print("xyz_world",xyz_world.shape)
-
-        xyz_world, xyz_cam, confidence_filtered = range_mask_torch(xyz_world, xyz_cam, confidence_filtered, opt)
-
+        xyz_world, xyz_cam, confidence_filtered, final_mask = range_mask_torch(xyz_world, xyz_cam, confidence_filtered, opt, final_mask)
         xyz_cam_lst.append(xyz_cam.cpu() if cpu2gpu else xyz_cam)
         xyz_world_lst.append(xyz_world[:,:3].cpu() if cpu2gpu else xyz_world[:,:3])
         confidence_filtered_lst.append(confidence_filtered.cpu() if cpu2gpu else confidence_filtered)
-
-    return xyz_cam_lst, xyz_world_lst, confidence_filtered_lst
+        final_mask_lst.append(final_mask)
+    return xyz_cam_lst, xyz_world_lst, confidence_filtered_lst, final_mask_lst
 
 
 def reassign_conf(confidence_filtered, final_mask, geo_mask_sum, geo_cnsst_num):

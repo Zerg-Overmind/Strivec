@@ -34,12 +34,50 @@ std::vector<torch::Tensor> sample_2_rot_cubic_tensoRF_cvrg_cuda(
         const int K,
         const bool KNN);
 
+torch::Tensor filter_tensoRF_cuda(
+        torch::Tensor xyz_sampled,
+        torch::Tensor xyz_inbbox,
+        torch::Tensor xyz_min,
+        torch::Tensor xyz_max,
+        torch::Tensor units,
+        torch::Tensor local_range,
+        torch::Tensor local_dims,
+        torch::Tensor tensoRF_cvrg_inds,
+        torch::Tensor tensoRF_count,
+        torch::Tensor tensoRF_topindx,
+        torch::Tensor geo_xyz,
+        torch::Tensor geo_rot,
+        const int K,
+        const int ord_thresh);
+
 // C++ interface
 
 #define CHECK_CUDA(x) TORCH_CHECK(x.type().is_cuda(), #x " must be a CUDA tensor")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
 
+
+torch::Tensor filter_tensoRF(
+    torch::Tensor xyz_sampled,
+    torch::Tensor xyz_inbbox,
+    torch::Tensor xyz_min,
+    torch::Tensor xyz_max,
+    torch::Tensor units,
+    torch::Tensor local_range,
+    torch::Tensor local_dims,
+    torch::Tensor tensoRF_cvrg_inds,
+    torch::Tensor tensoRF_count,
+    torch::Tensor tensoRF_topindx,
+    torch::Tensor geo_rot,
+    torch::Tensor geo_xyz,
+    const int K,
+    const int ord_thresh) {
+  CHECK_INPUT(xyz_sampled);
+  CHECK_INPUT(geo_xyz);
+  CHECK_INPUT(geo_rot);
+  assert(xyz_sampled.dim()==3);
+  return filter_tensoRF_cuda(xyz_sampled, xyz_inbbox, xyz_min, xyz_max, units, local_range, local_dims, tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx, geo_xyz, geo_rot, K, ord_thresh);
+}
 
 
 std::vector<torch::Tensor> sample_2_rot_cubic_tensoRF_cvrg(
@@ -97,6 +135,7 @@ std::vector<torch::Tensor> build_cubic_tensoRF_map_hier(
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("sample_2_rot_cubic_tensoRF_cvrg", &sample_2_rot_cubic_tensoRF_cvrg, "Sampled points to get torsoRF");
   m.def("build_cubic_tensoRF_map_hier", &build_cubic_tensoRF_map_hier, "build cubic tensoRF indices map");
+  m.def("filter_tensoRF", &filter_tensoRF, "filter tensoRF by threshold");
 }
 
 

@@ -6,10 +6,7 @@ args = config_parser()
 print(args)
 os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu_ids
 from models.apparatus import *
-
-
-
-from recon_prior_hier import gen_geo
+from preprocessing.recon_prior_hier import gen_geo
 
 import json, random
 from renderer import *

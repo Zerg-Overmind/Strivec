@@ -5,7 +5,7 @@ args = config_parser()
 print(args)
 os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu_ids
 from models.apparatus import *
-from recon_prior_adapt import gen_geo, gen_pnts
+from preprocessing.recon_prior_adapt import gen_geo, gen_pnts
 import json, random
 from renderer import *
 from utils import *
@@ -16,19 +16,19 @@ import sys
 from models.masked_adam import MaskedAdam
 from models.init_net.run import get_density_pnts
 from sklearn.decomposition import PCA
-
+import pickle
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 renderer = OctreeRender_trilinear_fast
 from dataLoader.ray_utils import SimpleSampler
 
 @torch.no_grad()
-def export_mesh(args, geo):
+def export_mesh(args, cluster_dict):
 
     ckpt = torch.load(args.ckpt, map_location=device)
     kwargs = ckpt['kwargs']
     kwargs.update({'device': device})
-    kwargs.update({'geo': geo, "args":args, "local_dims":args.local_dims_final})
+    kwargs.update({'geo': cluster_dict["cluster_xyz"], "args":args, "local_dims":args.local_dims_final})
     tensorf = eval(args.model_name)(**kwargs)
     tensorf.load(ckpt)
 
@@ -37,7 +37,7 @@ def export_mesh(args, geo):
 
 
 @torch.no_grad()
-def render_test(args, geo, train_dataset, test_dataset):
+def render_test(args, test_dataset):
     # init dataset
     white_bg = test_dataset.white_bg
     ray_type = args.ray_type
@@ -47,12 +47,13 @@ def render_test(args, geo, train_dataset, test_dataset):
         return
 
     ckpt = torch.load(args.ckpt, map_location=device)
+    with open(args.info_ckpt, 'rb') as f:
+        info = pickle.load(f)
     kwargs = ckpt['kwargs']
     kwargs.update({'device': device})
-    kwargs.update({'geo': geo, "args":args, "local_dims":args.local_dims_final})
-    kwargs.update({'step_ratio': args.step_ratio})
+    kwargs.update({'step_ratio': args.step_ratio, "args":args})
     tensorf = eval(args.model_name)(**kwargs)
-    tensorf.load(ckpt)
+    tensorf.load(ckpt, info)
     logfolder = os.path.dirname(args.ckpt)
     
     # render_only=0, render_path=0, render_test=1, render_train=0
@@ -72,14 +73,14 @@ def render_test(args, geo, train_dataset, test_dataset):
         evaluation_path(test_dataset,tensorf, c2ws, renderer, f'{logfolder}/{args.expname}/imgs_path_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ray_type=ray_type,device=device)
 
-def reconstruction(args, geo, train_dataset, test_dataset, pnts, grid_idx_lst, inv_idx_lst):
+def reconstruction(args, cluster_dict, train_dataset, test_dataset, pnts):
     # init dataset
 
-    if geo is None:
-        if hasattr(train_dataset, "center"):
-            geo = [train_dataset.center.reshape(1,3)]
-        else:
-            geo = [torch.zeros([1,3], device="cuda", dtype=torch.float32)]
+    # if cluster_dict is None:
+    #     if hasattr(train_dataset, "center"):
+    #         geo = [train_dataset.center.reshape(1,3)]
+    #     else:
+    #         geo = [torch.zeros([1,3], device="cuda", dtype=torch.float32)]
     white_bg = train_dataset.white_bg
     near_far = train_dataset.near_far
     ray_type = args.ray_type
@@ -100,10 +101,11 @@ def reconstruction(args, geo, train_dataset, test_dataset, pnts, grid_idx_lst, i
 
     # init parameters
     aabb = train_dataset.scene_bbox.to(device)
+    print("aabb", aabb)
     if args.ckpt is not None:
         ckpt = torch.load(args.ckpt, map_location=device)
         kwargs = ckpt['kwargs']
-        kwargs.update({'device':device, "geo": geo, "local_dims":args.local_dims_final, "pnts":pnts})
+        kwargs.update({'device':device, "cluster_dict": cluster_dict, "local_dims":args.local_dims_final, "pnts":pnts})
         tensorf = eval(args.model_name)(**kwargs)
         tensorf.load(ckpt)
     else:
@@ -113,7 +115,7 @@ def reconstruction(args, geo, train_dataset, test_dataset, pnts, grid_idx_lst, i
             alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift,
             distance_scale=args.distance_scale, pos_pe=args.pos_pe, view_pe=args.view_pe,
             fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
-            fea2denseAct=args.fea2denseAct, local_dims=args.local_dims_init, geo=geo, pnts=pnts, grid_idx_lst=grid_idx_lst, inv_idx_lst=inv_idx_lst, args=args)
+            fea2denseAct=args.fea2denseAct, local_dims=args.local_dims_init, cluster_dict=cluster_dict, pnts=pnts, args=args)
 
     # init grad, optimizer and lr
 
@@ -290,15 +292,13 @@ def reconstruction(args, geo, train_dataset, test_dataset, pnts, grid_idx_lst, i
             mask_filtered, tensoRF_per_ray = tensorf.filtering_rays(allrays, allrgbs)
             tensoRF_per_ray = None if tensoRF_per_ray is None else tensoRF_per_ray.to(device)
             allrays, allrgbs = allrays[mask_filtered], allrgbs[mask_filtered]
-
-
             trainingSampler = SimpleSampler(allrgbs.shape[0], args.batch_size)
 
         # TODO adaptively adding new tensoRF
-        if args.adapt_list is not None and iteration in args.adapt_list:
-            find_shadingloss(geo, train_dataset, allrays, allrgbs, tensorf, args, renderer, white_bg, ray_type, device, num_top_rays=args.top_rays[adapt_lvl])
-            # tensorf.adapt_add(adapt_lvl)
-            adapt_lvl += 1
+        # if args.adapt_list is not None and iteration in args.adapt_list:
+        #     find_shadingloss(geo, train_dataset, allrays, allrgbs, tensorf, args, renderer, white_bg, ray_type, device, num_top_rays=args.top_rays[adapt_lvl])
+        #     # tensorf.adapt_add(adapt_lvl)
+        #     adapt_lvl += 1
             
         if args.upsamp_list is not None and iteration in args.upsamp_list:
             up_stage+=1
@@ -317,7 +317,14 @@ def reconstruction(args, geo, train_dataset, test_dataset, pnts, grid_idx_lst, i
             # TODO use grads to optimize tensorf rotation
             if args.rotgrad > 0:
                 geo_optimizer = torch.optim.Adam(tensorf.get_geoparam_groups(args.lr_geo_init * lr_scale), betas=(0.9,0.99), weight_decay=0.0)
-    tensorf.save(f'{logfolder}/{args.expname}.th')
+
+        if args.rmv_unused_list is not None and iteration in args.rmv_unused_list:
+            tensorf.filtering_tensorf(allrays, iteration=iteration)
+            lr_scale = args.lr_decay_target_ratio ** (iteration / args.n_iters)
+            grad_vars = tensorf.get_optparam_groups(args.lr_init*lr_scale, args.lr_basis*lr_scale, skip_zero_grad = skip_zero_grad > 0)
+            optimizer = MaskedAdam(grad_vars, betas=(0.9,0.99)) if skip_zero_grad else torch.optim.Adam(grad_vars, betas=(0.9,0.99))
+
+    tensorf.save(f'{logfolder}/{args.expname}')
 
     # test after training
     if args.render_train:
@@ -401,62 +408,73 @@ if __name__ == '__main__':
     torch.manual_seed(20211202)
     np.random.seed(20211202)
     args = comp_revise(args) # change some config array to nested array, etc.
-
     dataset = dataset_dict[args.dataset_name]
-    train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False,
-                            rnd_ray=False, args=args)
     test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True, args=args)
 
-    pnts = get_density_pnts(args, train_dataset) if args.use_geo < 0 else gen_pnts(args)[...,:3] # a quickly generate points by a dvgo
-    # coarse
-    # np.savetxt(os.path.dirname(args.ckpt), pnt.cpu().numpy(), delimiter=";")
-    geo, xyz, grid_idx_lst, inv_idx_lst = gen_geo(args, geo=pnts) if args.use_geo != 0 else [None, None, None] # generate tensoRFs' position (xyz)
-    #vis_box(geo, args) # visualize tensoRF as rectangle boxes, able to rotate
-    
-    ########## PCA
-    #geo_cluster= [[[] for _ in range(geo[0].shape[0])], [[] for _ in range(geo[1].shape[0])]]
-    #for k_pnts in range(xyz.shape[0]):
-    #        geo_cluster[0][inv_idx_lst[0][k_pnts]].append(xyz[k_pnts,:].cpu().numpy())
-    #        geo_cluster[1][inv_idx_lst[1][k_pnts]].append(xyz[k_pnts,:].cpu().numpy())
-    #pca_cluster = [[[] for _ in range(geo[0].shape[0])], [[] for _ in range(geo[1].shape[0])]]
-    
-    ##num_sum_1=0
-    ##num_sum_2=0
-    #for k_c_1 in range(geo[0].shape[0]):
-    #    #num_sum_1+=len(geo_cluster[0][k_c_1])
-    #    #print(f'geo_cluster_{k_c_1}={len(geo_cluster[0][k_c_1])}')
-    #    #print(f'geo_cluster_sum={num_sum_1}')
-    #    if len(geo_cluster[0][k_c_1]) > 3:
-    #        pnts_data_0 = np.ones([len(geo_cluster[0][k_c_1]), 3])
-    #        for kk0 in range(len(geo_cluster[0][k_c_1])):
-    #            pnts_data_0[kk0, :] = geo_cluster[0][k_c_1][kk0]  
-    #        pca_k=PCA(n_components=3)
-    #        new_pnts_0=pca_k.fit_transform(pnts_data_0)
-    #        pnts_denorm0 = new_pnts_0*np.array([pnts_data_0[:,0].max()-pnts_data_0[:,0].min(), pnts_data_0[:,1].max()-pnts_data_0[:,1].min(), pnts_data_0[:,2].max()-pnts_data_0[:,2].min()])+ np.array([pnts_data_0[:,0].min(), pnts_data_0[:,1].min(), pnts_data_0[:,2].min()])                                   
-    #        pca_cluster[0][k_c_1].append(pnts_denorm0)
-            #pca_cluster[0][k_c].append(pca_k.explained_variance_ratio_)
-    #for k_c_2 in range(geo[1].shape[0]):  
-    #    #num_sum_2+=len(geo_cluster[1][k_c_2])
-    #    #print(f'geo_cluster_{k_c_2}={len(geo_cluster[1][k_c_2])}')
-    #    #print(f'geo_cluster_sum={num_sum_1+len(geo_cluster[1][k_c_2])}')
-    #    if len(geo_cluster[1][k_c_2]) > 3:
-    #        pnts_data_1 = np.ones([len(geo_cluster[1][k_c_2]), 3])
-    #        for kk1 in range(len(geo_cluster[1][k_c_2])):
-    #            pnts_data_1[kk1, :] = geo_cluster[1][k_c_2][kk1] 
-    #        pca_k=PCA(n_components=3)
-    #        new_pnts_1=pca_k.fit_transform(pnts_data_1)
-    #        pnts_denorm1 = new_pnts_1*np.array([pnts_data_1[:,0].max()-pnts_data_1[:,0].min(), pnts_data_1[:,1].max()-pnts_data_1[:,1].min(), pnts_data_1[:,2].max()-pnts_data_1[:,2].min().T])+ np.array([pnts_data_1[:,0].min(), pnts_data_1[:,1].min(), pnts_data_1[:,2].min()]) 
-    #        pca_cluster[1][k_c_2].append(pnts_denorm1)
-
-    ###########
-    ##np.savetxt(args.pointfile[:-4] + "_{}_{}_vox_pnts".format(args.datadir.split("/")[-1], args.vox_range[0][0]) + ".txt", pnts.cpu().numpy(), delimiter=";")
-    ##vis_box_pca(geo, pca_cluster, args)
-    ##print(f"cluster_num={len(geo[0])}")
-    
-    if args.export_mesh:
-        export_mesh(args, geo)
-
     if args.render_only and (args.render_test or args.render_path):
-        render_test(args, geo, train_dataset, test_dataset) # run test
-    else: # 1
-        reconstruction(args, geo, train_dataset, test_dataset, pnts, grid_idx_lst, inv_idx_lst) # run train and test in the end
+        render_test(args, test_dataset) # run test
+    else:  # 1
+        train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False,
+                                rnd_ray=False, args=args)
+
+        pnts = get_density_pnts(args, train_dataset) if args.use_geo < 0 else gen_pnts(
+            args)  # a quickly generate points by a dvgo
+        # coarse
+        # np.savetxt(os.path.dirname(args.ckpt), pnt.cpu().numpy(), delimiter=";")
+
+        # cluster_dict = {
+        #     "cluster_xyz": [],
+        #     "box_length": [],
+        #     "pca_axis": [],
+        #     "stds": []
+        # }
+
+        cluster_dict, pnts = gen_geo(args, pnts=pnts) if args.use_geo != 0 else [None, None, None]  # generate tensoRFs' position (xyz)
+        # vis_box(geo, args) # visualize tensoRF as rectangle boxes, able to rotate
+
+        ########## PCA
+        # geo_cluster= [[[] for _ in range(geo[0].shape[0])], [[] for _ in range(geo[1].shape[0])]]
+        # for k_pnts in range(xyz.shape[0]):
+        #        geo_cluster[0][inv_idx_lst[0][k_pnts]].append(xyz[k_pnts,:].cpu().numpy())
+        #        geo_cluster[1][inv_idx_lst[1][k_pnts]].append(xyz[k_pnts,:].cpu().numpy())
+        # pca_cluster = [[[] for _ in range(geo[0].shape[0])], [[] for _ in range(geo[1].shape[0])]]
+
+        ##num_sum_1=0
+        ##num_sum_2=0
+        # for k_c_1 in range(geo[0].shape[0]):
+        #    #num_sum_1+=len(geo_cluster[0][k_c_1])
+        #    #print(f'geo_cluster_{k_c_1}={len(geo_cluster[0][k_c_1])}')
+        #    #print(f'geo_cluster_sum={num_sum_1}')
+        #    if len(geo_cluster[0][k_c_1]) > 3:
+        #        pnts_data_0 = np.ones([len(geo_cluster[0][k_c_1]), 3])
+        #        for kk0 in range(len(geo_cluster[0][k_c_1])):
+        #            pnts_data_0[kk0, :] = geo_cluster[0][k_c_1][kk0]
+        #        pca_k=PCA(n_components=3)
+        #        new_pnts_0=pca_k.fit_transform(pnts_data_0)
+        #        pnts_denorm0 = new_pnts_0*np.array([pnts_data_0[:,0].max()-pnts_data_0[:,0].min(), pnts_data_0[:,1].max()-pnts_data_0[:,1].min(), pnts_data_0[:,2].max()-pnts_data_0[:,2].min()])+ np.array([pnts_data_0[:,0].min(), pnts_data_0[:,1].min(), pnts_data_0[:,2].min()])
+        #        pca_cluster[0][k_c_1].append(pnts_denorm0)
+        # pca_cluster[0][k_c].append(pca_k.explained_variance_ratio_)
+        # for k_c_2 in range(geo[1].shape[0]):
+        #    #num_sum_2+=len(geo_cluster[1][k_c_2])
+        #    #print(f'geo_cluster_{k_c_2}={len(geo_cluster[1][k_c_2])}')
+        #    #print(f'geo_cluster_sum={num_sum_1+len(geo_cluster[1][k_c_2])}')
+        #    if len(geo_cluster[1][k_c_2]) > 3:
+        #        pnts_data_1 = np.ones([len(geo_cluster[1][k_c_2]), 3])
+        #        for kk1 in range(len(geo_cluster[1][k_c_2])):
+        #            pnts_data_1[kk1, :] = geo_cluster[1][k_c_2][kk1]
+        #        pca_k=PCA(n_components=3)
+        #        new_pnts_1=pca_k.fit_transform(pnts_data_1)
+        #        pnts_denorm1 = new_pnts_1*np.array([pnts_data_1[:,0].max()-pnts_data_1[:,0].min(), pnts_data_1[:,1].max()-pnts_data_1[:,1].min(), pnts_data_1[:,2].max()-pnts_data_1[:,2].min().T])+ np.array([pnts_data_1[:,0].min(), pnts_data_1[:,1].min(), pnts_data_1[:,2].min()])
+        #        pca_cluster[1][k_c_2].append(pnts_denorm1)
+
+        ###########
+        ##np.savetxt(args.pointfile[:-4] + "_{}_{}_vox_pnts".format(args.datadir.split("/")[-1], args.vox_range[0][0]) + ".txt", pnts.cpu().numpy(), delimiter=";")
+        ##vis_box_pca(geo, pca_cluster, args)
+        ##print(f"cluster_num={len(geo[0])}")
+
+        reconstruction(args, cluster_dict, train_dataset, test_dataset, pnts)  # run train and test in the end
+    if args.export_mesh:
+        export_mesh(args, cluster_dict)
+
+
+

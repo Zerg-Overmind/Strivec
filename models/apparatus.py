@@ -121,7 +121,6 @@ class AlphaGridMask(torch.nn.Module):
     def sample_alpha(self, xyz_sampled):
         xyz_sampled = self.normalize_coord(xyz_sampled)
         alpha_vals = F.grid_sample(self.alpha_volume, xyz_sampled.view(1, -1, 1, 1, 3), align_corners=True).view(-1)
-
         return alpha_vals
 
     def normalize_coord(self, xyz_sampled):

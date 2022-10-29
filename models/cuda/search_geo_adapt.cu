@@ -11,6 +11,76 @@
    Points sampling helper functions.
  */
 
+template <typename scalar_t>
+__global__ void mask_tensoRF(
+        scalar_t* __restrict__ xyz_sampled,
+        int8_t* __restrict__ xyz_inbbox,
+        scalar_t* __restrict__ geo_xyz,
+        scalar_t* __restrict__ geo_rot,
+        scalar_t* __restrict__ xyz_min,
+        int16_t* __restrict__ local_dims,
+        scalar_t* __restrict__ units,
+        scalar_t* __restrict__ local_range,
+        int32_t* __restrict__ tensoRF_cvrg_inds,
+        int8_t* __restrict__ tensoRF_count,
+        int16_t* __restrict__ tensoRF_topindx,
+        bool* __restrict__ tensoRF_mask,
+        const int gridX,
+        const int gridY,
+        const int gridZ,
+        const int n_rays,
+        const int n_sample,
+        const int maxK,
+        const int K,
+        const int ord_thresh
+        ) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if(idx < n_rays) {
+    int sample_shift, sample_xyzshift, indx, indy, indz, inds, cvrg_id, tid, tf_count, offset_t, offset_r, rel_x, rel_y, rel_z, rx, ry, rz;
+    float px, py, pz;
+    int ord_count = 0;
+    for (int i = 0; i < n_sample; i++){
+        sample_shift = idx * n_sample + i;
+        if(xyz_inbbox[sample_shift] < 1) continue;
+        sample_xyzshift = sample_shift * 3;
+        px = xyz_sampled[sample_xyzshift];
+        py = xyz_sampled[sample_xyzshift + 1];
+        pz = xyz_sampled[sample_xyzshift + 2];
+
+        indx = min(gridX-1, (int)((px - xyz_min[0]) / units[0]));
+        indy = min(gridY-1, (int)((py - xyz_min[1]) / units[1]));
+        indz = min(gridZ-1, (int)((pz - xyz_min[2]) / units[2]));
+        inds = indx * gridY * gridZ + indy * gridZ + indz;
+        cvrg_id = tensoRF_cvrg_inds[inds];
+        if (cvrg_id >= 0){
+            tf_count = 0;
+            for(int kid=0; kid < tensoRF_count[cvrg_id]; kid++) {
+                tid = tensoRF_topindx[cvrg_id * maxK + kid];
+                offset_t = tid * 3;
+                offset_r = tid * 9;
+
+                rel_x = px - geo_xyz[offset_t];
+                rel_y = py - geo_xyz[offset_t+1];
+                rel_z = pz - geo_xyz[offset_t+2];
+
+                rx = rel_x * geo_rot[offset_r] + rel_y * geo_rot[offset_r+3]  + rel_z * geo_rot[offset_r+6];
+
+                ry = rel_x * geo_rot[offset_r+1] + rel_y * geo_rot[offset_r+4]  + rel_z * geo_rot[offset_r+7];
+
+                rz = rel_x * geo_rot[offset_r+2] + rel_y * geo_rot[offset_r+5]  + rel_z * geo_rot[offset_r+8];
+
+                if (abs(rx) <= local_range[offset_t] && abs(ry) <= local_range[offset_t+1] && abs(rz) <= local_range[offset_t+2]){
+                    tf_count++;
+                    tensoRF_mask[tid] = true;
+                }
+            }
+            if (tf_count > 0) ord_count++;
+            if (ord_count >= ord_thresh) break;
+        }
+    }
+  }
+}
+
 
 template <typename scalar_t>
 __global__ void find_pca_tensoRF_and_repos_cuda_kernel(
@@ -468,3 +538,42 @@ std::vector<torch::Tensor> sample_2_rot_cubic_tensoRF_cvrg_cuda(torch::Tensor xy
   return {tensoRF_mask.reshape(-1), local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, final_tensoRF_id, final_agg_id};
 }
 
+
+torch::Tensor filter_tensoRF_cuda(torch::Tensor xyz_sampled, torch::Tensor xyz_inbbox, torch::Tensor xyz_min, torch::Tensor xyz_max, torch::Tensor units, torch::Tensor local_range, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds, torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_xyz, torch::Tensor geo_rot, const int K, const int ord_thresh) {
+
+  const int threads = 256;
+  const int n_pts = geo_xyz.size(0);
+  const int n_rays = xyz_sampled.size(0);
+  const int n_sample = xyz_sampled.size(1);
+  const int maxK = tensoRF_topindx.size(1);
+  const int gridX = tensoRF_cvrg_inds.size(0);
+  const int gridY = tensoRF_cvrg_inds.size(1);
+  const int gridZ = tensoRF_cvrg_inds.size(2);
+
+  auto tensoRF_mask = torch::zeros({n_pts}, torch::dtype(torch::kBool).device(torch::kCUDA));
+
+  AT_DISPATCH_FLOATING_TYPES(xyz_sampled.type(), "mask_tensoRF", ([&] {
+      mask_tensoRF<scalar_t><<<(n_rays+threads-1)/threads, threads>>>(
+        xyz_sampled.data<scalar_t>(),
+        xyz_inbbox.data<int8_t>(),
+        geo_xyz.data<scalar_t>(),
+        geo_rot.data<scalar_t>(),
+        xyz_min.data<scalar_t>(),
+        local_dims.data<int16_t>(),
+        units.data<scalar_t>(),
+        local_range.data<scalar_t>(),
+        tensoRF_cvrg_inds.data<int32_t>(),
+        tensoRF_count.data<int8_t>(),
+        tensoRF_topindx.data<int16_t>(),
+        tensoRF_mask.data<bool>(),
+        gridX,
+        gridY,
+        gridZ,
+        n_rays,
+        n_sample,
+        maxK,
+        K,
+        ord_thresh);
+  }));
+  return tensoRF_mask;
+}
