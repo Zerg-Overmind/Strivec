@@ -304,6 +304,7 @@ def config_parser(cmd=None):
     parser.add_argument("--rmv_unused_list", type=int, action="append", default=None, help="list of iterations to remove tensorfs which r always behind others")
     parser.add_argument("--rmv_unused_ord_thresh", type=int, action="append", default=None, help="ordinal threshold of removing tensorf which r always behind others")
     parser.add_argument('--cluster_method', type=str, action="append",  default=None, help="clustering method, in None, use voxel to cluster")
+    parser.add_argument('--boxing_method', type=str, action="append",  default=None, help="bbox method, if None, usc pca")
     parser.add_argument('--cluster_num', type=int, action="append", default=None)
     parser.add_argument('--idx_view', type=int, default=0)
     # logging/saving options

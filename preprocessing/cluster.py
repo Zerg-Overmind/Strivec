@@ -21,6 +21,9 @@ from numpy import where
 from sklearn.datasets import make_classification
 from sklearn.cluster import DBSCAN, KMeans, MeanShift, SpectralClustering
 from sklearn.mixture import GaussianMixture
+# from preprocessing.gmm_BatyaGG.GMM_GMR import GMM_GMR
+# from preprocessing.fast_gmm.python.pygmm import GMM as fast_gmm
+from preprocessing.gmm_torch.gmm import GaussianMixture as torch_gmm
 from matplotlib import pyplot
 from mvs import mvs_utils, filter_utils
 
@@ -37,8 +40,6 @@ def scatter_mean(indices, updates, shape):
 
     return target / divd
 
-
-
 def load_pnts():
 	vox_res=100
 	pointfile="/home/xharlie/dev/cloud_tensoRF/log/ship_points.txt"
@@ -47,7 +48,7 @@ def load_pnts():
 		xyz_world_all.cuda() if len(xyz_world_all) < 99999999 else xyz_world_all[::(len(xyz_world_all) // 99999999 + 1), ...].cuda(), vox_res)
 	return xyz_world_all[:,:3].cpu().numpy()
 
-def cluster(X, method="gm", num=100, vis=False):
+def cluster(X, method="gm", num=100, vis=False, tol=0.0005):
 	# define the model
 	# ‘full’: each component has its own general covariance matrix.
 	# ‘tied’: all components share the same general covariance matrix.
@@ -55,7 +56,14 @@ def cluster(X, method="gm", num=100, vis=False):
 	# ‘spherical’: each component has its own single variance.
 
 	if method == "gm":
-		model = GaussianMixture(n_components=num, covariance_type="full", init_params="k-means++", max_iter=1000)
+		# 'kmeans', 'k-means++', 'random', 'random_from_data'
+		model = GaussianMixture(n_components=num, covariance_type="full", init_params="kmeans", max_iter=1000, tol=tol)
+	# elif method == "gmgg":
+	# 	model = GMM_GMR(num)
+	# elif method == "fastgmm":
+	# 	model = fast_gmm(nr_mixture = num, min_covar = tol, nr_iteration = 1000, concurrency = 18)
+	elif method == "torch_gmm":
+		model = torch_gmm(num, X.shape[-1], covariance_type="full", max_iter=1000, tol=tol)
 	elif method == "km":
 		model = KMeans(n_clusters=num, init="k-means++")
 	elif method == "ms":
@@ -68,6 +76,7 @@ def cluster(X, method="gm", num=100, vis=False):
 	# fit model and predict clusters
 	print("start clustering using ", method)
 	cluster_inds = np.asarray(model.fit_predict(X))
+	print("cluster_inds", X.shape, cluster_inds.shape)
 	# score_samples = np.asarray(model.score_samples(X))
 	# # scores = np.asarray(model.score(X))
 	# cluster_scores = np.asarray(model.predict_proba(X))
@@ -86,36 +95,22 @@ def cluster(X, method="gm", num=100, vis=False):
 	# # print("max_cluster_mean", max_cluster_mean)
 	# # max_cluster_mean_inds = np.argsort(max_cluster_mean)
 	# # print("smallest_cluster_inds", max_cluster_mean_inds)
-	#
-	# prior = np.asarray(model.weights_)
-	# p_v = prior / np.linalg.norm(np.asarray(model.covariances_), axis=(1, 2))
-	# print("prior weight", prior)
-	# print("prior weight min sort indices ", np.argsort(prior))
-	# print("**prior weight over norm min sort indices ", np.argsort(p_v))
-	# print("**prior weight over norm", p_v[np.argsort(p_v)])
-
-	# os.makedirs(path, exist_ok=True)
-	# np.savetxt(os.path.join(path, "mininds_100.txt"), X[min_inds[:100]], delimiter=";")
-	# np.savetxt(os.path.join(path, "mininds_1000.txt"), X[min_inds[:1000]], delimiter=";")
-	# np.savetxt(os.path.join(path, "mininds_3000.txt"), X[min_inds[:3000]], delimiter=";")
-	# np.savetxt(os.path.join(path, "mininds_10000.txt"), X[min_inds[:10000]], delimiter=";")
-	# print(cluster_inds)
 	# retrieve unique clusters
 	clusters = np.unique(cluster_inds)
-	print("finished with ", len(clusters), " clusters", clusters)
+	# print("finished with ", len(clusters), " clusters", clusters)
 	cluster_xyz=np.zeros([num,3], dtype=np.float32)
-	cluster_mask=np.ones([num], dtype=bool)
 	# create scatter plot for samples from each cluster
-	if vis:
-		counter = 0
-		for i in range(len(clusters)):
-			row_mask = cluster_inds == clusters[i]
-			# print("row_ix", row_mask.shape)
-			os.makedirs(path, exist_ok=True)
+	counter = 0
+	for i in range(len(clusters)):
+		row_mask = cluster_inds == clusters[i]
+		# print("row_ix", row_mask.shape)
+		os.makedirs(path, exist_ok=True)
+		if vis:
 			np.savetxt(os.path.join(path, "cluster_{:04d}.txt".format(counter)), X[row_mask], delimiter=";")
-			cluster_xyz[i] = np.mean(X[row_mask], axis=0)
-			counter+=1
-	return cluster_xyz, cluster_mask, cluster_inds
+		cluster_xyz[i] = np.mean(X[row_mask][...,:3], axis=0)
+		counter+=1
+	# print(np.asarray(model.means_)[...,:3], cluster_xyz)
+	return cluster_xyz, cluster_inds, model
 
 if __name__ == '__main__':
 	X = load_pnts()

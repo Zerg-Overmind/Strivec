@@ -14,7 +14,7 @@ from utils import masking, create_mvs_model
 from dataLoader import mvs_dataset_dict
 from preprocessing.cluster import cluster
 from collections import defaultdict
-from preprocessing.pca2tensorf import find_tensorf_box
+from preprocessing.boxing import find_tensorf_box, filter_cluster_n_pnts
 
 def load(pointfile):
     if os.path.exists(pointfile):
@@ -62,32 +62,41 @@ def gen_geo(args, pnts=None):
             mask *= (spacemax[None, ...].to(pnts.device) - pnts[...,:3]) >= 0
             mask = torch.prod(mask, dim=-1) > 0
             pnts = pnts[mask]
-
+    lvl = len(args.vox_range) if args.vox_range is not None else len(args.cluster_method)
     cluster_dict = {
-        "cluster_xyz": [],
-        "cluster_pnts": [],
-        "box_length": [],
-        "pca_axis": [],
-        "stds": [],
-        "cluster_pnts": []
+        "cluster_xyz": [[] for l in range(lvl)],
+        "cluster_pnts": [[] for l in range(lvl)],
+        "box_length": [[] for l in range(lvl)],
+        "pca_axis": [[] for l in range(lvl)],
+        "stds": [[] for l in range(lvl)],
     }
 
     if args.cluster_method is not None:
         cluster_dim = pnts.shape[-1] if pnts.shape[-1] == 6 else 3
-        if cluster_dim == 6:
-            pnts[..., 3:] /= 20480
         if args.vox_res > 0:
             _, _, sampled_pnt_idx = mvs_utils.construct_vox_points_closest(pnts[...,:3] if len(pnts) < 99999999 else pnts[::(len(pnts)//99999999+1),...].cuda(), args.vox_res)
             pnts = pnts[sampled_pnt_idx,:]
-
+        lvl_pnts = pnts[..., :cluster_dim].cpu().numpy()
+        if cluster_dim == 6:
+            lvl_pnts[..., 3:] = lvl_pnts[..., 3:] / (lvl_pnts[..., 3:] + 1).max(axis=-1, keepdims=True) / 100
+        count=1
         for l in range(len(args.cluster_method)):
-            cluster_xyz, cluster_mask, cluster_inds = cluster(pnts[..., :cluster_dim].cpu().numpy(), method=args.cluster_method[l], num=args.cluster_num[l], vis=False)
-            cluster_pnts, cluster_xyz, box_length, pca_axis, stds, pnt_leftout = find_tensorf_box(cluster_xyz, cluster_mask, pnts[...,:3], cluster_inds)
-            cluster_dict["cluster_xyz"].append(cluster_xyz)
-            cluster_dict["box_length"].append(box_length)
-            cluster_dict["pca_axis"].append(pca_axis)
-            cluster_dict["stds"].append(stds)
-            cluster_dict["cluster_pnts"].append(cluster_pnts)
+            while lvl_pnts is not None and count < 100 and len(lvl_pnts) > 1:
+                cluster_xyz, cluster_inds, cluster_model = cluster(lvl_pnts, method=args.cluster_method[l] if count==1 else "gm", num=np.minimum(args.cluster_num[l]//min(count,2), len(lvl_pnts) // 2), vis=False, tol=0.000001 if count > 1 else 0.00001)
+                cluster_pnts, pca_cluster_newpnts, cluster_xyz, box_length, pca_axis, stds = find_tensorf_box(cluster_xyz, lvl_pnts, cluster_inds, cluster_model, args.boxing_method[l])
+                cluster_xyz, cluster_pnts, box_length, pca_axis, stds, lvl_pnts = filter_cluster_n_pnts(cluster_xyz, cluster_pnts, pca_cluster_newpnts, box_length, pca_axis, stds, cluster_model, args.dilation_ratio[l], args, count=count)
+                # if len(cluster_xyz) == 0:
+                #     break
+                count+=1
+                cluster_dict["cluster_xyz"][l].append(cluster_xyz)
+                cluster_dict["box_length"][l].append(box_length)
+                cluster_dict["pca_axis"][l].append(pca_axis)
+                cluster_dict["stds"][l].append(stds)
+                cluster_dict["cluster_pnts"][l] += cluster_pnts
+            cluster_dict["cluster_xyz"][l] = np.concatenate(cluster_dict["cluster_xyz"][l])
+            cluster_dict["box_length"][l] = np.concatenate(cluster_dict["box_length"][l])
+            cluster_dict["pca_axis"][l] = np.concatenate(cluster_dict["pca_axis"][l])
+            cluster_dict["stds"][l] = np.concatenate(cluster_dict["stds"][l])
     elif args.vox_range is not None and not args.pointfile[:-4].endswith("vox"): # 1
         #geo = load("/home/gqk/cloud_tensoRF/log/ship_points.txt") # mvs points
         for i in range(len(args.vox_range)):
@@ -95,11 +104,11 @@ def gen_geo(args, pnts=None):
             print("after vox geo shape", geo_lvl.shape)
             np.savetxt(args.pointfile[:-4] + "_{}_{}_vox".format(args.datadir.split("/")[-1], args.vox_range[i][0]) + ".txt", geo_lvl.cpu().numpy(), delimiter=";")
             cluster_xyz, box_length, pca_axis, stds, pnt_leftout = find_tensorf_box(geo_lvl[...,:3], None, pnts, cluster_inds)
-            cluster_dict["cluster_xyz"].append(geo_lvl[...,:3])
-            cluster_dict["box_length"].append(box_length)
-            cluster_dict["pca_axis"].append(pca_axis)
-            cluster_dict["stds"].append(stds)
-            cluster_dict["cluster_pnts"].append(cluster_pnts)
+            cluster_dict["cluster_xyz"][l].append(geo_lvl[...,:3])
+            cluster_dict["box_length"][l].append(box_length)
+            cluster_dict["pca_axis"][l].append(pca_axis)
+            cluster_dict["stds"][l].append(stds)
+            cluster_dict["cluster_pnts"][l].append(cluster_pnts)
             # grid_idx_lst.append(sparse_grid_idx.cuda())
             # inv_idx_lst.append(inv_idx.cuda())
             
