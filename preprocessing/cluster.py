@@ -5,9 +5,9 @@ import pathlib
 sys.path.append(os.path.join(pathlib.Path(__file__).parent.absolute(), '..'))
 import torch
 import numpy as np
-torch.manual_seed(0)
-np.random.seed(0)
-
+# torch.manual_seed(0)
+# np.random.seed(0)
+import time
 
 from opt_adapt import config_parser
 args = config_parser()
@@ -48,30 +48,31 @@ def load_pnts():
 		xyz_world_all.cuda() if len(xyz_world_all) < 99999999 else xyz_world_all[::(len(xyz_world_all) // 99999999 + 1), ...].cuda(), vox_res)
 	return xyz_world_all[:,:3].cpu().numpy()
 
-def cluster(X, method="gm", num=100, vis=False, tol=0.0005):
+def cluster(X, method="gmm", num=100, vis=False, tol=0.0005):
 	# define the model
 	# ‘full’: each component has its own general covariance matrix.
 	# ‘tied’: all components share the same general covariance matrix.
 	# ‘diag’: each component has its own diagonal covariance matrix.
 	# ‘spherical’: each component has its own single variance.
 
-	if method == "gm":
+	if method == "gmm":
 		# 'kmeans', 'k-means++', 'random', 'random_from_data'
-		model = GaussianMixture(n_components=num, covariance_type="full", init_params="kmeans", max_iter=1000, tol=tol)
+		np.random.seed(int(time.time()))
+		model = GaussianMixture(n_components=num, covariance_type="full", init_params="k-means++", max_iter=1000, tol=tol)
 	# elif method == "gmgg":
 	# 	model = GMM_GMR(num)
 	# elif method == "fastgmm":
 	# 	model = fast_gmm(nr_mixture = num, min_covar = tol, nr_iteration = 1000, concurrency = 18)
-	elif method == "torch_gmm":
-		model = torch_gmm(num, X.shape[-1], covariance_type="full", max_iter=1000, tol=tol)
+	elif method == "torchgmm":
+		model = torch_gmm(num, X.shape[-1], covariance_type="full", init_params="kmeans", max_iter=1000, tol=tol)
 	elif method == "km":
 		model = KMeans(n_clusters=num, init="k-means++")
 	elif method == "ms":
 		model = MeanShift(n_jobs=18)
 	elif method == "sc":
 		model = SpectralClustering(n_clusters=num, n_jobs=18)
-	else:
-		model = DBSCAN(eps=0.20, min_samples=9, n_jobs=18)
+	elif method == "db":
+		model = DBSCAN(eps=0.17, min_samples=1, n_jobs=18)
 
 	# fit model and predict clusters
 	print("start clustering using ", method)
@@ -98,7 +99,7 @@ def cluster(X, method="gm", num=100, vis=False, tol=0.0005):
 	# retrieve unique clusters
 	clusters = np.unique(cluster_inds)
 	# print("finished with ", len(clusters), " clusters", clusters)
-	cluster_xyz=np.zeros([num,3], dtype=np.float32)
+	cluster_xyz=np.zeros([len(clusters),3], dtype=np.float32)
 	# create scatter plot for samples from each cluster
 	counter = 0
 	for i in range(len(clusters)):

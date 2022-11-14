@@ -71,46 +71,54 @@ def gen_geo(args, pnts=None):
         "stds": [[] for l in range(lvl)],
     }
 
-    if args.cluster_method is not None:
-        cluster_dim = pnts.shape[-1] if pnts.shape[-1] == 6 else 3
+    for l in range(lvl):
         if args.vox_res > 0:
-            _, _, sampled_pnt_idx = mvs_utils.construct_vox_points_closest(pnts[...,:3] if len(pnts) < 99999999 else pnts[::(len(pnts)//99999999+1),...].cuda(), args.vox_res)
-            pnts = pnts[sampled_pnt_idx,:]
-        lvl_pnts = pnts[..., :cluster_dim].cpu().numpy()
+            _, _, sampled_pnt_idx = mvs_utils.construct_vox_points_closest(
+                pnts[..., :3] if len(pnts) < 99999999 else pnts[::(len(pnts) // 99999999 + 1), ...].cuda(), args.vox_res)
+            pnts = pnts[sampled_pnt_idx, :]
+
+        cluster_dim = pnts.shape[-1] if pnts.shape[-1] == 6 else 3
+        lvl_pnts = pnts[..., :cluster_dim]
         if cluster_dim == 6:
-            lvl_pnts[..., 3:] = lvl_pnts[..., 3:] / (lvl_pnts[..., 3:] + 1).max(axis=-1, keepdims=True) / 100
-        count=1
-        for l in range(len(args.cluster_method)):
-            while lvl_pnts is not None and count < 100 and len(lvl_pnts) > 1:
-                cluster_xyz, cluster_inds, cluster_model = cluster(lvl_pnts, method=args.cluster_method[l] if count==1 else "gm", num=np.minimum(args.cluster_num[l]//min(count,2), len(lvl_pnts) // 2), vis=False, tol=0.000001 if count > 1 else 0.00001)
-                cluster_pnts, pca_cluster_newpnts, cluster_xyz, box_length, pca_axis, stds = find_tensorf_box(cluster_xyz, lvl_pnts, cluster_inds, cluster_model, args.boxing_method[l])
-                cluster_xyz, cluster_pnts, box_length, pca_axis, stds, lvl_pnts = filter_cluster_n_pnts(cluster_xyz, cluster_pnts, pca_cluster_newpnts, box_length, pca_axis, stds, cluster_model, args.dilation_ratio[l], args, count=count)
-                # if len(cluster_xyz) == 0:
-                #     break
-                count+=1
-                cluster_dict["cluster_xyz"][l].append(cluster_xyz)
-                cluster_dict["box_length"][l].append(box_length)
-                cluster_dict["pca_axis"][l].append(pca_axis)
-                cluster_dict["stds"][l].append(stds)
-                cluster_dict["cluster_pnts"][l] += cluster_pnts
-            cluster_dict["cluster_xyz"][l] = np.concatenate(cluster_dict["cluster_xyz"][l])
-            cluster_dict["box_length"][l] = np.concatenate(cluster_dict["box_length"][l])
-            cluster_dict["pca_axis"][l] = np.concatenate(cluster_dict["pca_axis"][l])
-            cluster_dict["stds"][l] = np.concatenate(cluster_dict["stds"][l])
-    elif args.vox_range is not None and not args.pointfile[:-4].endswith("vox"): # 1
-        #geo = load("/home/gqk/cloud_tensoRF/log/ship_points.txt") # mvs points
-        for i in range(len(args.vox_range)):
-            geo_lvl, xyz, sparse_grid_idx, cluster_inds = mvs_utils.construct_voxrange_points_mean(pnts[..., :3], torch.as_tensor(args.vox_range[i], dtype=torch.float32, device=pnts.device), vox_center=args.vox_center[i]>0)
-            print("after vox geo shape", geo_lvl.shape)
-            np.savetxt(args.pointfile[:-4] + "_{}_{}_vox".format(args.datadir.split("/")[-1], args.vox_range[i][0]) + ".txt", geo_lvl.cpu().numpy(), delimiter=";")
-            cluster_xyz, box_length, pca_axis, stds, pnt_leftout = find_tensorf_box(geo_lvl[...,:3], None, pnts, cluster_inds)
-            cluster_dict["cluster_xyz"][l].append(geo_lvl[...,:3])
+            lvl_pnts[..., 3:] = lvl_pnts[..., 3:] / torch.max(lvl_pnts[..., 3:] + 1, dim=-1, keepdims=True)[0] / 100
+
+        count=0
+        count_max = 10
+        if args.vox_range is not None: # 1
+            #geo = load("/home/gqk/cloud_tensoRF/log/ship_points.txt") # mvs points
+            cluster_xyz, lvl_pnts, sparse_grid_idx, cluster_inds = mvs_utils.construct_voxrange_points_mean(lvl_pnts, torch.as_tensor(args.vox_range[l], dtype=torch.float32, device=pnts.device), vox_center=args.vox_center[l]>0)
+            cluster_xyz, lvl_pnts, sparse_grid_idx, cluster_inds = cluster_xyz.cpu().numpy(), lvl_pnts.cpu().numpy(), sparse_grid_idx.cpu().numpy(), cluster_inds.cpu().numpy()
+            # np.savetxt(args.pointfile[:-4] + "_{}_{}_vox".format(args.datadir.split("/")[-1], args.vox_range[l][0]) + ".txt", geo_lvl.cpu().numpy(), delimiter=";")
+            cluster_pnts, pca_cluster_newpnts, cluster_xyz, box_length, pca_axis, stds = find_tensorf_box(cluster_xyz, lvl_pnts, cluster_inds, None, "pca")
+            cluster_xyz, cluster_pnts, box_length, pca_axis, stds, lvl_pnts = filter_cluster_n_pnts(cluster_xyz, cluster_pnts, pca_cluster_newpnts, box_length, pca_axis, stds, None, args.dilation_ratio[l], args, filter_thresh= 15000, count=count)
+            cluster_dict["cluster_xyz"][l].append(cluster_xyz[...,:3])
             cluster_dict["box_length"][l].append(box_length)
             cluster_dict["pca_axis"][l].append(pca_axis)
             cluster_dict["stds"][l].append(stds)
-            cluster_dict["cluster_pnts"][l].append(cluster_pnts)
+            cluster_dict["cluster_pnts"][l] += cluster_pnts
+            count += 1
             # grid_idx_lst.append(sparse_grid_idx.cuda())
             # inv_idx_lst.append(inv_idx.cuda())
+        lvl_pnts = lvl_pnts.cpu().numpy() if torch.is_tensor(lvl_pnts) else lvl_pnts
+        if args.cluster_method is not None:
+            for l in range(len(args.cluster_method)):
+                while lvl_pnts is not None and count <= count_max and len(lvl_pnts) > 1:
+                    cluster_xyz, cluster_inds, cluster_model = cluster(lvl_pnts, method=args.cluster_method[l], num=np.minimum(args.cluster_num[l]//min(count,1), len(lvl_pnts) // 2), vis=False, tol=0.000001 if count > 1 else 0.000001)
+                    cluster_pnts, pca_cluster_newpnts, cluster_xyz, box_length, pca_axis, stds = find_tensorf_box(cluster_xyz, lvl_pnts, cluster_inds, cluster_model, args.boxing_method[l])
+                    cluster_xyz, cluster_pnts, box_length, pca_axis, stds, lvl_pnts = filter_cluster_n_pnts(cluster_xyz, cluster_pnts, pca_cluster_newpnts, box_length, pca_axis, stds, cluster_model, args.dilation_ratio[l], args, filter_thresh= 10000 if count < count_max else 5000, count=count)
+                    count+=1
+                    if len(cluster_xyz) == 0:
+                        continue
+                    cluster_dict["cluster_xyz"][l].append(cluster_xyz)
+                    cluster_dict["box_length"][l].append(box_length)
+                    cluster_dict["pca_axis"][l].append(pca_axis)
+                    cluster_dict["stds"][l].append(stds)
+                    cluster_dict["cluster_pnts"][l] += cluster_pnts
+                cluster_dict["cluster_xyz"][l] = np.concatenate(cluster_dict["cluster_xyz"][l])
+                cluster_dict["box_length"][l] = np.concatenate(cluster_dict["box_length"][l])
+                cluster_dict["pca_axis"][l] = np.concatenate(cluster_dict["pca_axis"][l])
+                cluster_dict["stds"][l] = np.concatenate(cluster_dict["stds"][l])
+
             
     # if args.fps_num is not None: # fps_num=[0]
     #     for i in range(len(args.fps_num)):

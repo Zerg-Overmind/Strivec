@@ -10,8 +10,9 @@ batch_size = 4096 #4096
 #rmv_unused_list = [100, 4100]
 #rmv_unused_ord_thresh = [2, 2]
 
-cluster_method=["gm"]
-cluster_num=[128]
+cluster_method=["gmm"] # torch_gmm, gmm
+cluster_num=[64]
+boxing_method=["pca"] # pca, obb, gmm
 
 upsamp_list = [2000,3000,4000,5500,7000]
 update_AlphaMask_list = [2000,4000,12000] # [2000,4000,15000,30000]
@@ -22,8 +23,8 @@ local_dims_final = [121, 121, 121, 61, 61, 61] #   [40, 40, 40]
 local_dims_trend = [43, 65, 85, 103, 121, 23, 35, 43, 53, 61]
 
 # [0.6 / 29, 0.6 / 43, 0.6 / 65, 0.6 / 85, 0.6 / 103, 0.6 / 121]
-local_unit = [0.02068965517, 0.01395348837, 0.00923076923, 0.00705882352, 0.00582524271, 0.00495867768]
-dilation_ratio = [1.2, 1.2]
+local_unit = [0.02, 0.01, 0.008, 0.006, 0.004, 0.003]
+dilation_ratio = [1.2, 1.2] # [1.2, 1.2]
 ###### adapt
 adapt_local_range = [0.075, 0.075, 0.075]
 adapt_dims_init = [21, 21, 21] #   [3, 5, 9, 17, 33]
@@ -64,7 +65,7 @@ ray_type=2
 skip_zero_grad=1
 gpu_ids="1"
 vox_res = 100
-vox_range= [0.4, 0.4, 0.4] #[0.4, 0.4, 0.4, 0.2, 0.2, 0.2]
+vox_range= [0.2, 0.2, 0.2] #[0.4, 0.4, 0.4, 0.2, 0.2, 0.2]
 vox_center= [1] #[1,0]
 ranges=[-1.277, -1.300, -0.550, 1.371, 1.349, 0.729]
 

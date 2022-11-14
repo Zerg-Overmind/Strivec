@@ -122,9 +122,7 @@ def get_obb(cluster_xyz, cluster_pnts, cluster_model):
     pca_cluster_edge_leng = np.zeros([len(cluster_xyz), 3], dtype=np.float32)
     cluster_raw_center = np.zeros([len(cluster_xyz), 3], dtype=np.float32)
     stds = np.zeros([len(cluster_xyz), 3], dtype=np.float32)
-    cluster_raw_mean = np.asarray(cluster_model.means_)[..., :3]  # np.zeros([len(cluster_xyz), 3],
-    eigen_vals, eigen_vecs = np.linalg.eig(np.asarray(cluster_model.covariances_))
-    idx = np.argsort(eigen_vals, axis=1)[..., ::-1]
+    cluster_raw_mean = np.asarray(cluster_model.means_)[..., :3] if cluster_model is not None and hasattr(cluster_model, "means_") else np.asarray([np.mean(pnts_data[..., :3], axis=0) for pnts_data in cluster_pnts])
     for k_c in range(len(cluster_xyz)):
         pnts_data = cluster_pnts[k_c][:, :3]
         if len(pnts_data) > 4:
@@ -139,7 +137,6 @@ def get_obb(cluster_xyz, cluster_pnts, cluster_model):
             new_pnts = np.matmul(new_pnts, pca_axis[k_c].T)
             stds[k_c] = np.std(new_pnts, axis=0)
         else:
-            cluster_raw_mean[k_c] = np.mean(pnts_data[..., :3], axis=0)
             cluster_raw_center[k_c] = cluster_raw_mean[k_c]
             new_pnts = pnts_data[..., :3] - cluster_raw_mean[k_c][None, :]
             pca_axis[k_c] = np.asarray([[1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=np.float32)
@@ -196,7 +193,7 @@ def pnts_uncovered_cross(outpnts, cluster_xyz, box_length, pca_axis, dilation):
 
     return outpnts[outpnts_mask == len(cluster_xyz)]
 
-def filter_cluster_n_pnts(cluster_xyz, cluster_pnts, pca_cluster_newpnts, box_length, pca_axis, stds, cluster_model, dilation, args, count=0):
+def filter_cluster_n_pnts(cluster_xyz, cluster_pnts, pca_cluster_newpnts, box_length, pca_axis, stds, cluster_model, dilation, args, filter_thresh=20000, count=0):
     # prior = np.asarray(cluster_model.weights_)
     prior = np.asarray([len(cluster_pnt) for cluster_pnt in cluster_pnts])
     print(prior)
@@ -205,7 +202,7 @@ def filter_cluster_n_pnts(cluster_xyz, cluster_pnts, pca_cluster_newpnts, box_le
     print(np.sort(p_v), np.argsort(p_v))
     draw_box_pca(torch.as_tensor(cluster_xyz), None, box_length / 2, f'{args.basedir}/{args.expname}', count+100, None, rot_m=torch.transpose(torch.as_tensor(pca_axis, dtype=torch.float32), 1, 2), subdir="rot_tensoRF")
 
-    cluster_mask = p_v >= 50000  # 0.02
+    cluster_mask = p_v >= filter_thresh  # 0.02
     # print(cluster_xyz.shape, len(cluster_pnts), len(pca_cluster_newpnts), box_length, pca_axis.shape, stds.shape)
     # print(cluster_mask.shape, cluster_mask)
     mask_lst = cluster_mask.tolist()

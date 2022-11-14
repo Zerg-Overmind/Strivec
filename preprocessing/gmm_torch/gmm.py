@@ -4,7 +4,7 @@ import numpy as np
 from math import pi
 from scipy.special import logsumexp
 from .utils import calculate_matmul, calculate_matmul_n_times
-
+import time, datetime
 
 class GaussianMixture(torch.nn.Module):
     """
@@ -62,6 +62,7 @@ class GaussianMixture(torch.nn.Module):
 
 
     def _init_params(self, device="cuda"):
+        torch.manual_seed(time.time())
         if self.mu_init is not None:
             assert self.mu_init.size() == (1, self.n_components, self.n_features), "Input mu_init does not have required tensor dimensions (1, %i, %i)" % (self.n_components, self.n_features)
             # (1, k, d)
@@ -140,7 +141,7 @@ class GaussianMixture(torch.nn.Module):
         x = self.check_size(x)
 
         if self.init_params == "kmeans" and self.mu_init is None:
-            mu = self.get_kmeans_mu(x, n_centers=self.n_components)
+            mu = self.get_kmeans_mu(x, n_centers=self.n_components, init_times=1000, min_delta=1e-5)
             self.mu.data = mu
 
         i = 0
@@ -307,7 +308,11 @@ class GaussianMixture(torch.nn.Module):
         log_det = torch.empty(size=(self.n_components,)).to(var.device)
         
         for k in range(self.n_components):
-            log_det[k] = 2 * torch.log(torch.diagonal(torch.linalg.cholesky(var[0,k]))).sum()
+            try:
+                log_det[k] = 2 * torch.log(torch.diagonal(torch.linalg.cholesky(var[0,k]))).sum()
+            except:
+                print("cholesky needs positive semi-definite, adding 1e-3 now")
+                log_det[k] = 2 * torch.log(torch.diagonal(torch.linalg.cholesky(var[0, k] + torch.eye(len(var[0, k]), device=var.device) * 1e-3))).sum()
 
         return log_det.unsqueeze(-1)
 
@@ -466,6 +471,7 @@ class GaussianMixture(torch.nn.Module):
         min_cost = np.inf
 
         for i in range(init_times):
+            np.random.seed(i)
             tmp_center = x[np.random.choice(np.arange(x.shape[0]), size=n_centers, replace=False), ...]
             l2_dis = torch.norm((x.unsqueeze(1).repeat(1, n_centers, 1) - tmp_center), p=2, dim=2)
             l2_cls = torch.argmin(l2_dis, dim=1)
