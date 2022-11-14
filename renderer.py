@@ -9,30 +9,32 @@ from models.archive_pointTensoRF import PointTensorCPB, PointTensorCPD, PointTen
 from utils import *
 from dataLoader.ray_utils import ndc_rays_blender
 import random
-
-
+ 
+ 
 def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ray_type=0, white_bg=True, is_train=False,
     device='cuda', return_depth=0, tensoRF_per_ray=None, eval=False, rot_step=False, depth_bg=True):
 
     rgbs, alphas, depth_maps, weights, uncertainties, rgbpers, ray_ids = [], [], [], [], [], [], []
     N_rays_all = rays.shape[0]
+    
     for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
+
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(device)
         tensoRF_per_ray_chunk = tensoRF_per_ray[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(device) if tensoRF_per_ray is not None else None
         # print("tensoRF_per_ray shape ", rays.shape, rays_chunk.shape, tensoRF_per_ray.shape, tensoRF_per_ray_chunk.shape)
         rgb_map, depth_map, rgbper, ray_id, weight = tensorf(rays_chunk, is_train=is_train, white_bg=white_bg,
                                                              ray_type=ray_type, N_samples=N_samples,
                                                              return_depth=return_depth,
-                                                             tensoRF_per_ray=tensoRF_per_ray_chunk, eval=eval, rot_step=rot_step, depth_bg=depth_bg)
-
+                                                              tensoRF_per_ray=tensoRF_per_ray_chunk, eval=eval, rot_step=rot_step, depth_bg=depth_bg)
+        
         rgbs.append(rgb_map)
         depth_maps.append(depth_map)
         if rgbper is not None:
             rgbpers.append(rgbper)
             ray_ids.append(ray_id)
-            weights.append(weight)
+            weights.append(weight) 
 
-    return torch.cat(rgbs), torch.cat(weights), torch.cat(depth_maps) if return_depth else None, torch.cat(rgbpers) if len(rgbpers) > 0 else None, torch.cat(ray_ids) if len(ray_ids) > 0 else None
+    return torch.cat(rgbs), torch.cat(weights) if len(weights) > 0 else None, torch.cat(depth_maps) if return_depth else None, torch.cat(rgbpers) if len(rgbpers) > 0 else None, torch.cat(ray_ids) if len(ray_ids) > 0 else None
 
 
 # def den_eval(geo, dataset, allrays, allrgbs, tensorf, args, renderer, N_samples=-1, white_bg=True, ray_type=0,
@@ -60,23 +62,49 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
         pass
 
     near_far = test_dataset.near_far
-    W, H = test_dataset.img_wh
-    W, H = W - 2 * args.test_margin, H - 2 * args.test_margin
-    img_eval_interval = 1 if N_vis < 0 else max(test_dataset.all_rays.shape[0] // N_vis,1)
-    idxs = list(range(0, test_dataset.all_rays.shape[0], img_eval_interval))
+    if len(test_dataset.img_wh) > 2:
+       img_eval_interval = 1 if N_vis < 0 else max(len(test_dataset.all_rays) // N_vis,1)
+       idxs = list(range(0, len(test_dataset.all_rays), img_eval_interval))
+       img_eval_itv = 1 if N_vis < 0 else max(len(test_dataset.img_wh) // N_vis,1)
+       idxs_img_lst = list(range(0, len(test_dataset.img_wh), img_eval_itv))
+       idxs_img_num = [test_dataset.img_wh[:idxs_img_lst[bkb]] for bkb in range(len(idxs_img_lst))]
+       idxs_img = []
+    else:
+       img_eval_interval = 1 if N_vis < 0 else max(test_dataset.all_rays.shape[0] // N_vis,1)
+       idxs = list(range(0, test_dataset.all_rays.shape[0], img_eval_interval))
 
+    if len(test_dataset.img_wh) > 2:
+       for idx_k in range(len(idxs_img_num)):
+           if idx_k == 0:
+              idxs_img.append(0)
+           else:
+              idxs_img.append((np.array(idxs_img_num[idx_k])[:,0]*np.array(idxs_img_num[idx_k])[:,1]).sum())
+    
+    img_kk = 0
     for idx, samples in tqdm(enumerate(test_dataset.all_rays[0::img_eval_interval]), file=sys.stdout):
+     
+        if len(test_dataset.img_wh) > 2:
 
-        if test_dataset.all_rays.dim() == 1:
-            rays, gt_rgb = test_dataset.get_by_id(idxs[idx])
+           W, H = test_dataset.img_wh[idxs[idx]]
         else:
-            rays = samples.view(-1, samples.shape[-1])
-            gt_rgb = test_dataset.all_rgbs[idxs[idx]].view(H, W, 3)
-        gt_rgb = margin_restore(gt_rgb, args.test_margin)
+            W, H = test_dataset.img_wh
+           
+         
+        W, H = W - 2 * args.test_margin, H - 2 * args.test_margin
 
+        rays = samples.view(-1, samples.shape[-1])
+            
+        if len(test_dataset.img_wh) > 2:
+            gt_rgb = test_dataset.all_rgbs_stack[idxs_img_lst[img_kk]]
+        else:
+            gt_rgb = test_dataset.all_rgbs[idxs[idx]].view(H, W, 3)
+            
+        
+        gt_rgb = margin_restore(gt_rgb, args.test_margin)
+        img_kk += 1
         cur_tensoRF_per_ray = None
         # _, _, cur_tensoRF_per_ray = tensorf.filtering_rays(rays, None, bbox_only=True, apply_filter=False)
-
+    
         rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=args.batch_size, N_samples=N_samples, ray_type=ray_type, white_bg = white_bg, device=device, return_depth=1, tensoRF_per_ray = None if cur_tensoRF_per_ray is None else cur_tensoRF_per_ray.cuda() , eval=True)
         rgb_map = rgb_map.clamp(0.0, 1.0)
 

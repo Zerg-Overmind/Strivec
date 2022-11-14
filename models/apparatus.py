@@ -205,6 +205,24 @@ class MLPRender(torch.nn.Module):
         rgb = torch.sigmoid(rgb)
 
         return rgb
+def draw_ray(all_rays_vert, all_rays_edge, near, far):
+
+    vertex = np.array([(all_rays_vert[i, 0], all_rays_vert[i, 1], all_rays_vert[i, 2]) for i in range(all_rays_vert.shape[0])],
+                        dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+    #vertex_o = np.array([(all_rays[i, 0]+all_rays[i, 3]*near, all_rays[i, 1]+all_rays[i, 4]*near, all_rays[i, 2]+all_rays[i, 5]*near) for i in range(all_rays.shape[0])],
+    #                     dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+    #vertex_d = np.array([(all_rays[i, 0]+all_rays[i, 3]*far, all_rays[i, 1]+all_rays[i, 4]*far, all_rays[i, 2]+all_rays[i, 5]*far) for i in range(all_rays.shape[0])],
+    #                     dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+    
+    edge = np.array([(2 * a + 0, 2 * a + 1, 255, 165, 0) for a in range(all_rays_edge.shape[0])], dtype = [('vertex1', 'i4'),('vertex2', 'i4'),('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
+    
+    ver = PlyElement.describe(vertex, 'vertex')
+    edg = PlyElement.describe(edge, 'edge')
+    #log = f'/home/gqk/cloud_tensoRF/log/indoor_scnenes'
+    log = f'/home/gqk/cloud_tensoRF/log/indoor_scnenes/rot_tensoRF'
+
+    with open('{}/{}.ply'.format(log, f'ray'), mode='wb') as f:
+        PlyData([ver, edg], text=True).write(f)
 
 
 def draw_box(center_xyz, local_range, log, step, rot_m=None):
@@ -219,13 +237,14 @@ def draw_box(center_xyz, local_range, log, step, rot_m=None):
                              [-sx, -sy, -sz],
                              ], dtype=center_xyz.dtype, device=center_xyz.device)[None, ...]
                              
-    corner_xyz = center_xyz[..., None, :] + (torch.matmul(shift, rot_m) if rot_m is not None else shift)
+    #corner_xyz = center_xyz[..., None, :] + (torch.matmul(shift, rot_m) if rot_m is not None else shift)
+    corner_xyz = center_xyz + (torch.matmul(shift, rot_m) if rot_m is not None else shift)
 
     corner_xyz = corner_xyz.cpu().detach().numpy().reshape(-1, 3)
 
     vertex = np.array([(corner_xyz[i,0], corner_xyz[i,1], corner_xyz[i,2]) for i in range(len(corner_xyz))],
                          dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
-    
+
 
     edge = np.array([(8 * a + 0, 8 * a + 1, 255, 165, 0) for a in range(len(center_xyz))] +
                     [(8 * b + 1, 8 * b + 5, 255, 165, 0) for b in range(len(center_xyz))] +
@@ -248,7 +267,6 @@ def draw_box(center_xyz, local_range, log, step, rot_m=None):
     with open('{}/rot_tensoRF/{}.ply'.format(log, step), mode='wb') as f:
         PlyData([ver, edg], text=True).write(f)
 
-
 def mask_split(tensor, indices):
     unique = torch.unique(indices)
     times = len(indices) // len(tensor)
@@ -256,6 +274,7 @@ def mask_split(tensor, indices):
 
 def draw_box_pca(center_xyz, pca_cluster, local_range, log, step, args, rot_m=None, subdir="rot_tensoRF"):
     corner_xyz_r = []
+   
     for kn in range(local_range.shape[0]):
         sx, sy, sz = local_range[kn, 0], local_range[kn, 1], local_range[kn, 2]
         shift = torch.as_tensor([[sx, sy, sz],
@@ -269,7 +288,6 @@ def draw_box_pca(center_xyz, pca_cluster, local_range, log, step, args, rot_m=No
                                  ], dtype=center_xyz.dtype, device=center_xyz.device)[None, ...]
         # import pdb;pdb.set_trace()
         corner_xyz_kn = center_xyz[kn, None, :] + (torch.matmul(shift, rot_m[kn].T) if rot_m is not None else shift)
-
         corner_xyz_kn = corner_xyz_kn.cpu().detach().numpy()#.reshape(-1, 3)
         corner_xyz_r.append(corner_xyz_kn)
     
@@ -299,8 +317,10 @@ def draw_box_pca(center_xyz, pca_cluster, local_range, log, step, args, rot_m=No
     ver = PlyElement.describe(vertex, 'vertex')
     edg = PlyElement.describe(edge, 'edge')
     os.makedirs('{}/{}'.format(log, subdir), exist_ok=True)
-    with open('{}/{}/{}_pca.ply'.format(log, subdir, step), mode='wb') as f:
+    
+    with open('{}/{}/tensorf_pca.ply'.format(log, subdir), mode='wb') as f:
         PlyData([ver, edg], text=True).write(f)
+
 
 
 def draw_sep_box_pca(raw_cluster, center_xyz, pca_cluster, local_range, log, step, args, rot_m=None, subdir="rot_tensoRF"):

@@ -6,6 +6,7 @@ from .tankstemple import TanksTempleDataset
 from .tankstempleBG import TanksTempleDatasetBG
 from .your_own_data import YourOwnDataset
 from .scannet import ScannetDataset
+from .indoor_data import IndoorDataset
 
 
 
@@ -15,6 +16,7 @@ dataset_dict = {'blender': BlenderDataset,
                'TanksAndTempleBG':TanksTempleDatasetBG,
                'nsvf':NSVF,
                'scannet':ScannetDataset,
-                'own_data':YourOwnDataset}
+                'own_data':YourOwnDataset,
+                'indoor_data': IndoorDataset}
 
 mvs_dataset_dict = {'blender': BlenderMVSDataset}
