@@ -7,7 +7,8 @@ from PIL import Image
 from torchvision import transforms as T
 from .data_utils import *
 import sys
-sys.path.append("/home/gqk/cloud_tensoRF/models")
+models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../models")
+sys.path.append(models_dir)
 from apparatus import draw_ray
 from .ray_utils import *
 from plyfile import PlyData
