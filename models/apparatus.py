@@ -8,9 +8,8 @@ import os
 from torch_scatter import segment_coo
 from torch.utils.cpp_extension import load
 from plyfile import PlyData, PlyElement
-
-
 parent_dir = os.path.dirname(os.path.abspath(__file__))
+
 render_utils_cuda = load(
     name='render_utils_cuda',
     sources=[
@@ -18,7 +17,7 @@ render_utils_cuda = load(
         for path in ['cuda/render_utils.cpp', 'cuda/render_utils_kernel.cu']],
     verbose=True)
 
-
+#
 search_geo_cuda = load(
     name='search_geo_cuda',
     sources=[
@@ -35,12 +34,20 @@ search_geo_hier_cuda = load(
     verbose=True)
 
 
-search_geo_adapt_cuda = load(
-    name='search_geo_adapt_cuda',
+grid_sample_1d = load(
+    name='grid_sample_1d',
     sources=[
         os.path.join(parent_dir, path)
-        for path in ['cuda/search_geo_adapt.cpp', 'cuda/search_geo_adapt.cu']],
+        for path in ['cuda/grid_sample_1d.cpp', 'cuda/grid_sample_1d.cu']],
     verbose=True)
+
+
+# search_geo_adapt_cuda = load(
+#     name='search_geo_adapt_cuda',
+#     sources=[
+#         os.path.join(parent_dir, path)
+#         for path in ['cuda/search_geo_adapt.cpp', 'cuda/search_geo_adapt.cu']],
+#     verbose=True)
 
 
 def positional_encoding(positions, freqs):
@@ -205,6 +212,7 @@ class MLPRender(torch.nn.Module):
         rgb = torch.sigmoid(rgb)
 
         return rgb
+
 def draw_ray(all_rays_vert, all_rays_edge, near, far):
 
     vertex = np.array([(all_rays_vert[i, 0], all_rays_vert[i, 1], all_rays_vert[i, 2]) for i in range(all_rays_vert.shape[0])],
@@ -219,7 +227,7 @@ def draw_ray(all_rays_vert, all_rays_edge, near, far):
     ver = PlyElement.describe(vertex, 'vertex')
     edg = PlyElement.describe(edge, 'edge')
     #log = f'/home/gqk/cloud_tensoRF/log/indoor_scnenes'
-    log = f'/home/gqk/cloud_tensoRF/log/indoor_scnenes/rot_tensoRF'
+    # log = f'/home/gqk/cloud_tensoRF/log/indoor_scnenes/rot_tensoRF'
 
     with open('{}/{}.ply'.format(log, f'ray'), mode='wb') as f:
         PlyData([ver, edg], text=True).write(f)
@@ -318,9 +326,53 @@ def draw_box_pca(center_xyz, pca_cluster, local_range, log, step, args, rot_m=No
     edg = PlyElement.describe(edge, 'edge')
     os.makedirs('{}/{}'.format(log, subdir), exist_ok=True)
     
-    with open('{}/{}/tensorf_pca.ply'.format(log, subdir), mode='wb') as f:
+    with open('{}/{}/{}_pca.ply'.format(log, subdir, step), mode='wb') as f:
         PlyData([ver, edg], text=True).write(f)
 
+
+def draw_hier_box(geo_xyz, local_range, log, step=0, rot_m=None):
+    for l in range(len(geo_xyz)):
+        center_xyz = geo_xyz[l]
+        sx, sy, sz = local_range[l][0], local_range[l][1], local_range[l][2]
+        shift = torch.as_tensor([[sx, sy, sz],
+                                 [-sx, sy, sz],
+                                 [sx, -sy, sz],
+                                 [sx, sy, -sz],
+                                 [sx, -sy, -sz],
+                                 [-sx, -sy, sz],
+                                 [-sx, sy, -sz],
+                                 [-sx, -sy, -sz],
+                                 ], dtype=center_xyz.dtype, device=center_xyz.device)[None, ...]
+
+        # corner_xyz = center_xyz[..., None, :] + (torch.matmul(shift, rot_m) if rot_m is not None else shift)
+        # print("(torch.matmul(shift, rot_m) if rot_m is not None else shift)", shift.shape, center_xyz.shape)
+        corner_xyz = center_xyz[..., None, :] + (torch.matmul(shift, rot_m) if rot_m is not None else shift)
+
+        corner_xyz = corner_xyz.cpu().detach().numpy().reshape(-1, 3)
+
+        vertex = np.array([(corner_xyz[i, 0], corner_xyz[i, 1], corner_xyz[i, 2]) for i in range(len(corner_xyz))],
+                          dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+
+        edge = np.array([(8 * a + 0, 8 * a + 1, 255, 165, 0) for a in range(len(center_xyz))] +
+                        [(8 * b + 1, 8 * b + 5, 255, 165, 0) for b in range(len(center_xyz))] +
+                        [(8 * c + 5, 8 * c + 2, 255, 165, 0) for c in range(len(center_xyz))] +
+                        [(8 * d + 2, 8 * d + 0, 255, 165, 0) for d in range(len(center_xyz))] +
+                        [(8 * e + 6, 8 * e + 7, 0, 255, 0) for e in range(len(center_xyz))] +
+                        [(8 * f + 7, 8 * f + 4, 255, 0, 0) for f in range(len(center_xyz))] +
+                        [(8 * g + 4, 8 * g + 3, 255, 165, 0) for g in range(len(center_xyz))] +
+                        [(8 * h + 3, 8 * h + 6, 255, 165, 0) for h in range(len(center_xyz))] +
+                        [(8 * i + 1, 8 * i + 6, 255, 165, 0) for i in range(len(center_xyz))] +
+                        [(8 * j + 5, 8 * j + 7, 0, 0, 255) for j in range(len(center_xyz))] +
+                        [(8 * k + 2, 8 * k + 4, 255, 165, 0) for k in range(len(center_xyz))] +
+                        [(8 * l + 0, 8 * l + 3, 255, 165, 0) for l in range(len(center_xyz))]
+                        , dtype=[('vertex1', 'i4'), ('vertex2', 'i4'),
+                                 ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
+
+        ver = PlyElement.describe(vertex, 'vertex')
+        edg = PlyElement.describe(edge, 'edge')
+        os.makedirs('{}/rot_tensoRF'.format(log), exist_ok=True)
+        with open('{}/rot_tensoRF/{}_lvl_{}.ply'.format(log, step, l), mode='wb') as f:
+            PlyData([ver, edg], text=True).write(f)
 
 
 def draw_sep_box_pca(raw_cluster, center_xyz, pca_cluster, local_range, log, step, args, rot_m=None, subdir="rot_tensoRF"):
@@ -371,7 +423,6 @@ def draw_sep_box_pca(raw_cluster, center_xyz, pca_cluster, local_range, log, ste
 
 ''' Misc
 '''
-#
 class Raw2Alpha(torch.autograd.Function):
     @staticmethod
     def forward(ctx, density, shift, interval):
@@ -425,6 +476,64 @@ class Raw2Alpha_randstep(torch.autograd.Function):
         interval = ctx.interval
         return render_utils_cuda.raw2alpha_randstep_backward(exp, grad_back.contiguous(), interval), None, None
 
+
+class GridSample1dVm(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, plane, line_1, line_2, line_3, xyz_sampled, aabb_low, aabb_high, units, lvl_units_l, local_range_l, local_dims_l, tensoRF_cvrg_inds_l, tensoRF_countl, tensoRF_topindx_l, geo_xyz_l, K_tensoRF_l, KNN):
+
+        plane_out, line_out, local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, final_tensoRF_id, final_agg_id, local_norm_xyz = grid_sample_1d.grid_sample_from_tensoRF(plane, line_1, line_2, line_3, xyz_sampled, aabb_low, aabb_high, units, lvl_units_l, local_range_l, local_dims_l, tensoRF_cvrg_inds_l, tensoRF_countl, tensoRF_topindx_l, geo_xyz_l, K_tensoRF_l, KNN)
+        if plane.requires_grad:
+            ctx.save_for_backward(local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, final_tensoRF_id)
+            ctx.plane_dim = list(plane.shape)
+            ctx.line_dim = list(line_1.shape)
+        # print("line_out", line_out.shape, torch.max(line_out, 1)[0])
+        # print("plane_out", plane_out.shape, torch.max(plane_out, 1)[0])
+        return plane_out, line_out, local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, final_tensoRF_id, final_agg_id, local_norm_xyz
+
+    @staticmethod
+    @torch.autograd.function.once_differentiable
+    def backward(ctx, grad_planeout, grad_lineout, grad_local_gindx_s, grad_local_gindx_l, grad_local_gweight_s, grad_local_gweight_l, grad_local_kernel_dist, grad_final_tensoRF_id, grad_final_agg_id, grad_local_norm_xyz):
+        local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, final_tensoRF_id = ctx.saved_tensors
+        plane_dim_lst = ctx.plane_dim
+        line_dim_lst = ctx.line_dim
+        planesurf_num, linesurf_num, component_num, res = plane_dim_lst[0], line_dim_lst[0], plane_dim_lst[1], plane_dim_lst[2]
+
+        grad_plane, grad_line_1, grad_line_2, grad_line_3 = grid_sample_1d.grid_sample_from_tensoRF_backward(local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, final_tensoRF_id, grad_planeout.contiguous(), grad_lineout.contiguous(), planesurf_num, linesurf_num, component_num, res)
+        # print("grad_plane", grad_plane.shape, torch.max(grad_plane, -1)[0])
+        # print("grad_line_1", grad_line_1.shape, torch.max(grad_line_1, -1)[0])
+        # print("grad_line_2", grad_line_2.shape, torch.max(grad_line_2, -1)[0])
+        # print("grad_line_3", grad_line_3.shape, torch.max(grad_line_3, -1)[0])
+        return grad_plane, grad_line_1, grad_line_2, grad_line_3, None, None, None, None, None, None, None, None, None, None, None, None, None
+
+
+
+class GridSample1dVm_winds(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, plane, line_1, line_2, line_3, local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, final_tensoRF_id):
+
+        plane_out, line_out = grid_sample_1d.cal_w_inds(plane, line_1, line_2, line_3, local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, final_tensoRF_id)
+        if plane.requires_grad:
+            ctx.save_for_backward(local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, final_tensoRF_id)
+            ctx.plane_dim = list(plane.shape)
+            ctx.line_dim = list(line_1.shape)
+        # print("line_out", line_out.shape, torch.max(line_out, 1)[0])
+        # print("plane_out", plane_out.shape, torch.max(plane_out, 1)[0])
+        return plane_out, line_out
+
+    @staticmethod
+    @torch.autograd.function.once_differentiable
+    def backward(ctx, grad_planeout, grad_lineout):
+        local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, final_tensoRF_id = ctx.saved_tensors
+        plane_dim_lst = ctx.plane_dim
+        line_dim_lst = ctx.line_dim
+        planesurf_num, linesurf_num, component_num, res = plane_dim_lst[0], line_dim_lst[0], plane_dim_lst[1], plane_dim_lst[2]
+
+        grad_plane, grad_line_1, grad_line_2, grad_line_3 = grid_sample_1d.grid_sample_from_tensoRF_backward(local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, final_tensoRF_id, grad_planeout.contiguous(), grad_lineout.contiguous(), planesurf_num, linesurf_num, component_num, res)
+        # print("grad_plane", grad_plane.shape, torch.max(grad_plane, -1)[0])
+        # print("grad_line_1", grad_line_1.shape, torch.max(grad_line_1, -1)[0])
+        # print("grad_line_2", grad_line_2.shape, torch.max(grad_line_2, -1)[0])
+        # print("grad_line_3", grad_line_3.shape, torch.max(grad_line_3, -1)[0])
+        return grad_plane, grad_line_1, grad_line_2, grad_line_3, None, None, None, None, None
 
 
 def raw2alpha_only(sigma, dist):

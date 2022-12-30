@@ -2594,7 +2594,7 @@ std::vector<torch::Tensor> sample_2_rotdist_tensoRF_cvrg_cuda(
             seconds);
       }));
   }
-  torch::cuda::synchronize();
+//  torch::cuda::synchronize();
 
   auto cvrg_count = tensoRF_mask.sum(1);
   auto cvrg_cumsum = cvrg_count.cumsum(0);

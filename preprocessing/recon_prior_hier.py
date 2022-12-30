@@ -49,8 +49,8 @@ def gen_geo(args):
     if args.vox_range is not None and not args.pointfile[:-4].endswith("vox"):
         geo_xyz, confidence = geo[..., :3], geo[..., -1:]
         for i in range(len(args.vox_range)):
-            geo_lvl = mvs_utils.construct_voxrange_points_mean(geo_xyz, torch.as_tensor(args.vox_range[i], dtype=torch.float32, device=geo.device), vox_center=args.vox_center[i]>0)
-            print("after vox geo shape", geo_lvl.shape)
+            geo_lvl, _, _, _ = mvs_utils.construct_voxrange_points_mean(geo_xyz, torch.as_tensor(args.vox_range[i], dtype=torch.float32, device=geo.device), vox_center=args.vox_center[i]>0)
+            # print("after vox geo shape", geo_lvl.shape)
             np.savetxt(args.pointfile[:-4] + "_{}_vox".format(args.vox_range[i][0]) + ".txt", geo_lvl.cpu().numpy(), delimiter=";")
             geo_lst.append(geo_lvl.cuda())
 

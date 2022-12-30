@@ -5,6 +5,7 @@ from models.tensoRF import TensorVM, TensorCP, raw2alpha, TensorVMSplit, AlphaGr
 from models.pointTensoRF import PointTensorCP
 from models.pointTensoRF_hier import PointTensorCP_hier
 from models.pointTensoRF_adapt import PointTensorCP_adapt
+from models.pointTensoRF_dbasis import PointTensor_DBaseVMGS #,PointTensor_DBase
 from models.archive_pointTensoRF import PointTensorCPB, PointTensorCPD, PointTensorVMSplit
 from utils import *
 from dataLoader.ray_utils import ndc_rays_blender
@@ -22,10 +23,7 @@ def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ray_typ
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(device)
         tensoRF_per_ray_chunk = tensoRF_per_ray[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(device) if tensoRF_per_ray is not None else None
         # print("tensoRF_per_ray shape ", rays.shape, rays_chunk.shape, tensoRF_per_ray.shape, tensoRF_per_ray_chunk.shape)
-        rgb_map, depth_map, rgbper, ray_id, weight = tensorf(rays_chunk, is_train=is_train, white_bg=white_bg,
-                                                             ray_type=ray_type, N_samples=N_samples,
-                                                             return_depth=return_depth,
-                                                              tensoRF_per_ray=tensoRF_per_ray_chunk, eval=eval, rot_step=rot_step, depth_bg=depth_bg)
+        rgb_map, depth_map, rgbper, ray_id, weight = tensorf(rays_chunk, is_train=is_train, white_bg=white_bg, ray_type=ray_type, N_samples=N_samples, return_depth=return_depth, tensoRF_per_ray=tensoRF_per_ray_chunk, eval=eval, rot_step=rot_step, depth_bg=depth_bg)
         
         rgbs.append(rgb_map)
         depth_maps.append(depth_map)

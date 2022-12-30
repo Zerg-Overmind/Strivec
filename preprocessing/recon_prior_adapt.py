@@ -85,12 +85,11 @@ def gen_geo(args, pnts=None):
         count=0
         count_max = 10
         if args.vox_range is not None: # 1
-            #geo = load("/home/gqk/cloud_tensoRF/log/ship_points.txt") # mvs points
             cluster_xyz, lvl_pnts, sparse_grid_idx, cluster_inds = mvs_utils.construct_voxrange_points_mean(lvl_pnts, torch.as_tensor(args.vox_range[l], dtype=torch.float32, device=pnts.device), vox_center=args.vox_center[l]>0)
             cluster_xyz, lvl_pnts, sparse_grid_idx, cluster_inds = cluster_xyz.cpu().numpy(), lvl_pnts.cpu().numpy(), sparse_grid_idx.cpu().numpy(), cluster_inds.cpu().numpy()
             # np.savetxt(args.pointfile[:-4] + "_{}_{}_vox".format(args.datadir.split("/")[-1], args.vox_range[l][0]) + ".txt", geo_lvl.cpu().numpy(), delimiter=";")
-            cluster_pnts, pca_cluster_newpnts, cluster_xyz, box_length, pca_axis, stds = find_tensorf_box(cluster_xyz, lvl_pnts, cluster_inds, None, "pca")
-            cluster_xyz, cluster_pnts, box_length, pca_axis, stds, lvl_pnts = filter_cluster_n_pnts(cluster_xyz, cluster_pnts, pca_cluster_newpnts, box_length, pca_axis, stds, None, args.dilation_ratio[l], args, filter_thresh= 15000, count=count)
+            cluster_pnts, pca_cluster_newpnts, cluster_xyz, box_length, pca_axis, stds = find_tensorf_box(cluster_xyz, lvl_pnts, cluster_inds, None, "obb")
+            cluster_xyz, cluster_pnts, box_length, pca_axis, stds, lvl_pnts = filter_cluster_n_pnts(cluster_xyz, cluster_pnts, pca_cluster_newpnts, box_length, pca_axis, stds, None, args.dilation_ratio[l], args, filter_thresh= 600, count=count) # 15000
             cluster_dict["cluster_xyz"][l].append(cluster_xyz[...,:3])
             cluster_dict["box_length"][l].append(box_length)
             cluster_dict["pca_axis"][l].append(pca_axis)
@@ -103,9 +102,10 @@ def gen_geo(args, pnts=None):
         if args.cluster_method is not None:
             for l in range(len(args.cluster_method)):
                 while lvl_pnts is not None and count <= count_max and len(lvl_pnts) > 1:
-                    cluster_xyz, cluster_inds, cluster_model = cluster(lvl_pnts, method=args.cluster_method[l], num=np.minimum(args.cluster_num[l]//min(count,1), len(lvl_pnts) // 2), vis=False, tol=0.000001 if count > 1 else 0.000001)
+                    cluster_xyz, cluster_inds, cluster_model = cluster(lvl_pnts, method=args.cluster_method[l], num=np.minimum(args.cluster_num[l]//min(count,2), len(lvl_pnts) // 2), vis=False, tol=0.000001 if count > 1 else 0.000001)
+                    # cluster_xyz, cluster_inds, cluster_model = cluster(lvl_pnts, method=args.cluster_method[l], num=args.cluster_num[l], vis=False, tol=0.000001 if count > 1 else 0.000001)
                     cluster_pnts, pca_cluster_newpnts, cluster_xyz, box_length, pca_axis, stds = find_tensorf_box(cluster_xyz, lvl_pnts, cluster_inds, cluster_model, args.boxing_method[l])
-                    cluster_xyz, cluster_pnts, box_length, pca_axis, stds, lvl_pnts = filter_cluster_n_pnts(cluster_xyz, cluster_pnts, pca_cluster_newpnts, box_length, pca_axis, stds, cluster_model, args.dilation_ratio[l], args, filter_thresh= 10000 if count < count_max else 5000, count=count)
+                    cluster_xyz, cluster_pnts, box_length, pca_axis, stds, lvl_pnts = filter_cluster_n_pnts(cluster_xyz, cluster_pnts, pca_cluster_newpnts, box_length, pca_axis, stds, cluster_model, args.dilation_ratio[l], args, filter_thresh=500 if count < count_max else 50, count=count) # 10000 if count < count_max else 5000
                     count+=1
                     if len(cluster_xyz) == 0:
                         continue

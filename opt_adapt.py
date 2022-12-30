@@ -206,7 +206,7 @@ def config_parser(cmd=None):
     parser.add_argument("--n_iters", type=int, default=30000, help="total training iters")
 
     parser.add_argument('--dataset_name', type=str, default='blender',
-                        choices=['blender', 'llff', 'nsvf', 'dtu','tankstemple', 'TanksAndTempleBG', 'own_data', 'scannet'])
+                        choices=['blender', 'llff', 'nsvf', 'dtu','tankstemple', 'TanksAndTempleBG', 'own_data', 'scannet', 'indoor_data'])
     parser.add_argument('--align_center', type=int, default=1)
     # parser.add_argument('--cal_mthd', type=str, default='drct', choices=['splat', 'drct'])
 

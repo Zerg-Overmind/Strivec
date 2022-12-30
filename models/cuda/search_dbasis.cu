@@ -269,7 +269,6 @@ __global__ void get_geo_inds_cuda_kernel(
             for (int k = zmin; k < zmax; k++){
                 if (min(abs(px - xyz_min[0] - i * units[0]), abs(px - xyz_min[0] - (i+1) * units[0])) < local_range[0] && min(abs(py - xyz_min[1] - j * units[1]), abs(py - xyz_min[1] - (j+1) * units[1])) < local_range[1] && min(abs(pz - xyz_min[2] - k * units[2]), abs(pz - xyz_min[2] - (k+1) * units[2])) < local_range[2]) {
                     tensoRF_cvrg_inds[shiftx + shifty + k] = 1;
-                    a;
                 }
             }
         }
@@ -538,6 +537,9 @@ std::vector<torch::Tensor> sample_2_rot_cubic_tensoRF_cvrg_cuda(torch::Tensor xy
 
   return {tensoRF_mask.reshape(-1), local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, final_tensoRF_id, final_agg_id};
 }
+
+
+
 
 
 torch::Tensor filter_tensoRF_cuda(torch::Tensor xyz_sampled, torch::Tensor xyz_inbbox, torch::Tensor xyz_min, torch::Tensor xyz_max, torch::Tensor units, torch::Tensor local_range, torch::Tensor local_dims, torch::Tensor tensoRF_cvrg_inds, torch::Tensor tensoRF_count, torch::Tensor tensoRF_topindx, torch::Tensor geo_xyz, torch::Tensor geo_rot, const int K, const int ord_thresh) {

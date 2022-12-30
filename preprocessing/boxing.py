@@ -166,8 +166,8 @@ def find_tensorf_box(cluster_xyz, pnts, cluster_inds, cluster_model, boxing_meth
 
 
 def set_box(geo_xyz, cluster_raw_center, pca_cluster_edge_leng, cluster_pnts, pca_cluster_newpnts, pca_axis, stds):
-    # box_length = np.maximum(pca_cluster_edge_leng, 0.000001)
-    box_length = np.maximum(np.minimum(pca_cluster_edge_leng, stds * 5), 0.000001)
+    box_length = np.maximum(pca_cluster_edge_leng, 0.000001)
+    # box_length = np.maximum(np.minimum(pca_cluster_edge_leng, stds * 5), 0.000001)
     # box_length = np.maximum(np.minimum(pca_cluster_edge_leng, stds * 5), 0.000001)
     # box_length = np.maximum(pca_cluster_edge_leng, 0.00001)
     return geo_xyz, box_length
@@ -193,13 +193,21 @@ def pnts_uncovered_cross(outpnts, cluster_xyz, box_length, pca_axis, dilation):
 
     return outpnts[outpnts_mask == len(cluster_xyz)]
 
+def volume_thresholding(cluster_pnts, box_length):
+    prior = np.asarray([len(cluster_pnt) for cluster_pnt in cluster_pnts])
+    return prior, prior / np.prod(box_length, axis=-1)
+
+def surface_thresholding(cluster_pnts, box_length):
+    prior = np.asarray([len(cluster_pnt) for cluster_pnt in cluster_pnts])
+    return prior, prior / (box_length[...,0] * box_length[...,1] + box_length[...,1] * box_length[...,2] + box_length[...,0] * box_length[...,2])
+
 def filter_cluster_n_pnts(cluster_xyz, cluster_pnts, pca_cluster_newpnts, box_length, pca_axis, stds, cluster_model, dilation, args, filter_thresh=20000, count=0):
     # prior = np.asarray(cluster_model.weights_)
-    prior = np.asarray([len(cluster_pnt) for cluster_pnt in cluster_pnts])
+    prior, p_v = surface_thresholding(cluster_pnts, box_length)
     print(prior)
+
     # p_v = prior / np.linalg.norm(np.asarray(model.covariances_), axis=(1, 2))
-    p_v = prior / np.prod(box_length, axis=-1)
-    print(np.sort(p_v), np.argsort(p_v))
+    print("np.sort(p_v)", np.sort(p_v), np.argsort(p_v))
     draw_box_pca(torch.as_tensor(cluster_xyz), None, box_length / 2, f'{args.basedir}/{args.expname}', count+100, None, rot_m=torch.transpose(torch.as_tensor(pca_axis, dtype=torch.float32), 1, 2), subdir="rot_tensoRF")
 
     cluster_mask = p_v >= filter_thresh  # 0.02

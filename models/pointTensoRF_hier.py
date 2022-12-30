@@ -755,7 +755,7 @@ class PointTensorCP_hier(PointTensorBase_hier):
             if len(local_gindx_s[l]) > 0:
                 sigma_feature = torch.sum(self.ind_intrp_line_map_batch_prod(self.vecMode, self.density_line[3*l:3*l+3], local_gindx_s[l], local_gindx_l[l], local_gweight_s[l], local_gweight_l[l], tensoRF_id[l]), dim=1, keepdim=True)
                 sigma_feature, has_tensorf = self.agg_tensoRF_at_samples(local_kernel_dist[l], agg_id[l], sigma_feature, out=torch.zeros([sample_num, 1], device=local_gindx_s[l].device, dtype=torch.float32), outweight=torch.zeros([sample_num, 1], device=local_gindx_s[l].device, dtype=torch.float32))
-                if self.args.den_lvl_norm:
+                if self.args.den_lvl_norm > 0:
                     num_lvl_exist += has_tensorf
                 sigma_feature_acc += sigma_feature.squeeze(-1)
         return sigma_feature_acc / torch.clamp(num_lvl_exist, min=1).squeeze(-1)
@@ -777,7 +777,7 @@ class PointTensorCP_hier(PointTensorBase_hier):
                     infeat = torch.cat([infeat, self.basis_mat[l](app_feat)], dim=-1)
                 else:
                     infeat += self.basis_mat[l](app_feat)
-                    if self.args.rad_lvl_norm:
+                    if self.args.rad_lvl_norm > 0:
                         num_lvl_exist += has_tensorf
             else:
                 infeat = torch.cat([infeat, torch.zeros([sample_num, self.app_dim[l]], device=infeat.device, dtype=torch.float32)], dim=-1) if self.args.radiance_add == 0 else infeat
