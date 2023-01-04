@@ -24,6 +24,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 renderer = OctreeRender_trilinear_fast
 
 
+
 class SimpleSampler:
     def __init__(self, total, batch):
         self.total = total

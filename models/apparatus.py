@@ -480,7 +480,8 @@ class Raw2Alpha_randstep(torch.autograd.Function):
 class GridSample1dVm(torch.autograd.Function):
     @staticmethod
     def forward(ctx, plane, line_1, line_2, line_3, xyz_sampled, aabb_low, aabb_high, units, lvl_units_l, local_range_l, local_dims_l, tensoRF_cvrg_inds_l, tensoRF_countl, tensoRF_topindx_l, geo_xyz_l, K_tensoRF_l, KNN):
-
+        # plane: plane_len (1 or 3), n_component[l][0], (int)(local_dims[l][0] * self.args.vm_dim_factor) + self.plane_add, (int)(local_dims[l][1] * self.args.vm_dim_factor) + self.plane_add)))
+        # line: len(self.geo_xyz[l]), n_component[l][0], local_dims[l][i] + self.line_add
         plane_out, line_out, local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, final_tensoRF_id, final_agg_id, local_norm_xyz = grid_sample_1d.grid_sample_from_tensoRF(plane, line_1, line_2, line_3, xyz_sampled, aabb_low, aabb_high, units, lvl_units_l, local_range_l, local_dims_l, tensoRF_cvrg_inds_l, tensoRF_countl, tensoRF_topindx_l, geo_xyz_l, K_tensoRF_l, KNN)
         if plane.requires_grad:
             ctx.save_for_backward(local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, final_tensoRF_id)
