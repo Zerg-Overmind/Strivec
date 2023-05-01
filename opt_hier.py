@@ -115,6 +115,10 @@ def config_parser(cmd=None):
         default=(1),
         help='final local dimension in each tensoRF'
     )
+
+    parser.add_argument("--world_bound_scale", type=float, default=1.0,
+                        help='scale up the bbox of scene')
+
     parser.add_argument("--rot_step", type=int, default=None, action="append")
     parser.add_argument("--unit_lvl", type=int, default=0, help='which lvl we take grid unit')
     parser.add_argument("--filterall", type=int, default=0, help='if only keep when all lvl covers or any lvl covers')
@@ -158,7 +162,7 @@ def config_parser(cmd=None):
     parser.add_argument("--n_iters", type=int, default=30000)
 
     parser.add_argument('--dataset_name', type=str, default='blender',
-                        choices=['blender', 'llff', 'nsvf', 'dtu','tankstemple', 'TanksAndTempleBG', 'own_data', 'scannet'])
+                        choices=['blender', 'llff', 'nsvf', 'dtu','tankstemple', 'TanksAndTempleBG', 'own_data', 'scannet', 'indoor_data'])
     parser.add_argument('--align_center', type=int, default=1)
     # parser.add_argument('--cal_mthd', type=str, default='drct', choices=['splat', 'drct'])
 
@@ -226,6 +230,7 @@ def config_parser(cmd=None):
     parser.add_argument("--render_test", type=int, default=0)
     parser.add_argument("--render_train", type=int, default=0)
     parser.add_argument("--render_path", type=int, default=0)
+    parser.add_argument("--render_all", type=int, default=0)
     parser.add_argument("--export_mesh", type=int, default=0)
 
     # rendering options
@@ -245,6 +250,9 @@ def config_parser(cmd=None):
     parser.add_argument("--white_bkgd", action='store_true',
                         help='set to render synthetic data on a white bkgd (always use for dvoxels)')
 
+    parser.add_argument("--top_rays", type=int, action="append", default=None, help="add new adaptive tensoRF to num. top_rays which has highest rendering loss")
+    parser.add_argument("--pre_N_iters", type=int, default=5000, help='in pre den, number of optimization steps')
+    parser.add_argument("--dir_den", type=int, default=0, help="directVOX_density")
 
 
     parser.add_argument("--upsamp_list", type=int, action="append")
@@ -262,6 +270,31 @@ def config_parser(cmd=None):
                         help='N images to vis')
     parser.add_argument("--vis_every", type=int, default=10000,
                         help='frequency of visualize the image')
+
+    parser.add_argument("--ub360", type=int, default=0, help='unbounded inward_facing or not')
+    ########################### args for dvgo initialization ##########################
+
+    parser.add_argument("--pre_num_voxels", type=int, default=1024000, help='N num voxel in dvgo initialization')
+    parser.add_argument("--pre_batch_size", type=int, default=8192, help='batch size in dvgo initialization')
+    parser.add_argument("--pervoxel_lr", type=int, default=1, help='view-count-based lr')
+    parser.add_argument("--pre_maskout_near_cam_vox", type=int, default=0, help='maskout grid points that between cameras and their near planes')
+    parser.add_argument("--pre_alpha_init", type=float, default=1e-6, help='set the alpha values everywhere at the begin of training')
+    parser.add_argument("--pre_alpha_init_ub", type=float, default=1e-4, help='set the alpha values everywhere at the begin of training')
+    parser.add_argument("--pre_lrate_decay", type=int, default=20, help='lr decay by 0.1 after every lrate_decay*1000 steps')
+    parser.add_argument("--pre_lrate_density", type=float, default=1e-1, help='lr of density voxel grid')
+    parser.add_argument("--pre_lrate_k0", type=float, default=1e-1, help='lr of color/feature voxel grid')
+    parser.add_argument("--decay_after_scale", type=float, default=1.0, help='decay act_shift after scaling')
+    parser.add_argument("--pre_weight_entropy_last", type=float, default=0.01, help='decay act_shift after scaling')
+    parser.add_argument("--pre_weight_rgbper", type=float, default=0.1, help='weight of per-point rgb loss')
+    parser.add_argument("--pre_maskout_lt_nviews", type=int, default=0, help='N images to vis')
+    parser.add_argument(
+        '--pre_pg_scale',
+        type=int,
+        nargs='+',
+        default=[],
+        help='steps for progressive scaling'
+    )
+
     if cmd is not None:
         return parser.parse_args(cmd)
     else:

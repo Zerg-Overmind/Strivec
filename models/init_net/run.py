@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from . import utils, dvgo
+from . import utils, dvgo, dcvgo, dmpigo
 # from lib.load_data import load_data
 
 # from torch_efficient_distloss import flatten_eff_distloss
@@ -18,10 +18,10 @@ sys.path.append("dataLoader/")
 from ray_utils import SimpleSampler
 
 
-def _compute_bbox_by_cam_frustrm_bounded(cfg, HW, K, poses, near, far):
+def _compute_bbox_by_cam_frustrm_bounded(cfg, WH, K, poses, near, far):
     xyz_min = torch.Tensor([np.inf, np.inf, np.inf])
     xyz_max = -xyz_min
-    H, W = HW
+    W, H = WH
     for c2w in poses:
         rays_o, rays_d, viewdirs = dvgo.get_rays_of_a_view(
                 H=H, W=W, K=K, c2w=c2w,
@@ -35,12 +35,13 @@ def _compute_bbox_by_cam_frustrm_bounded(cfg, HW, K, poses, near, far):
         xyz_max = torch.maximum(xyz_max, pts_nf.amax((0,1,2)))
     return xyz_min, xyz_max
 
-def _compute_bbox_by_cam_frustrm_unbounded(cfg, HW, Ks, poses, near_clip):
+def _compute_bbox_by_cam_frustrm_unbounded(cfg, WH, Ks, poses, near_clip):
     # Find a tightest cube that cover all camera centers
     xyz_min = torch.Tensor([np.inf, np.inf, np.inf])
     xyz_max = -xyz_min
-
-    for (H, W), K, c2w in zip(HW, Ks, poses):
+    W, H = WH
+    K = Ks
+    for c2w in poses:
         rays_o, rays_d, viewdirs = dvgo.get_rays_of_a_view(
                 H=H, W=W, K=K, c2w=c2w,
                 ndc=cfg["ndc"], inverse_y=cfg["inverse_y"],
@@ -48,11 +49,11 @@ def _compute_bbox_by_cam_frustrm_unbounded(cfg, HW, Ks, poses, near_clip):
         pts = rays_o + rays_d * near_clip
         xyz_min = torch.minimum(xyz_min, pts.amin((0,1)))
         xyz_max = torch.maximum(xyz_max, pts.amax((0,1)))
-        
     center = (xyz_min + xyz_max) * 0.5
-    radius = (center - xyz_min).max() * 1 #cfg["unbounded_inner_r"]
+    radius = (center - xyz_min).max() * cfg["unbounded_inner_r"]
     xyz_min = center - radius
     xyz_max = center + radius
+   
     return xyz_min, xyz_max
 
 def compute_bbox_by_cam_frustrm(args, cfg, HW, Ks, poses, near, far, **kwargs):
@@ -81,7 +82,7 @@ def create_new_model(cfg, args, xyz_min, xyz_max, stage):
         print(f'scene_rep_reconstruction ({stage}): \033[96muse contraced voxel grid (covering unbounded)\033[0m')
         model = dcvgo.DirectContractedVoxGO(
             xyz_min=xyz_min, xyz_max=xyz_max,
-            num_voxels=num_voxels, num_voxels_base=num_voxels, alpha_init=args.pre_alpha_init,
+            num_voxels=num_voxels, num_voxels_base=num_voxels, alpha_init=args.pre_alpha_init_ub,
             )
     else:
         print(f'scene_rep_reconstruction ({stage}): \033[96muse dense voxel grid\033[0m')
@@ -192,7 +193,8 @@ def scene_rep_reconstruction(args, cfg, xyz_min, xyz_max, dataset, stage, coarse
         ray_idx = trainingSampler.nextids()
         rays_o, rays_d, target = rays_o_tr[ray_idx].to(device), rays_d_tr[ray_idx].to(
             device), allrgbs[ray_idx].to(device)
-
+   
+        
         # volume rendering
         render_result = model(
             rays_o, rays_d, rays_d,
@@ -236,7 +238,7 @@ def scene_rep_reconstruction(args, cfg, xyz_min, xyz_max, dataset, stage, coarse
 
 def get_density_pnts(args, train_dataset, bounded=True):
     # args, cfg, HW, Ks, poses, i_train, near, far
-
+ 
     Ks = train_dataset.intrinsics 
     poses = train_dataset.raw_poses
     near, far = train_dataset.near_far
@@ -249,16 +251,29 @@ def get_density_pnts(args, train_dataset, bounded=True):
         "flip_x" : train_dataset.flip_x,
         "inverse_y" : train_dataset.inverse_y,
         "ndc" : train_dataset.ndc,
+        'near_clip': train_dataset.near_clip,
     }
 
-    if len(train_dataset.img_wh)>2:
-        HW = train_dataset.img_wh
-        xyz_min_coarse, xyz_max_coarse = _compute_bbox_by_cam_frustrm_unbounded(cfg, HW, Ks, poses, far)
-    else:
-        HW = [train_dataset.img_wh[1], train_dataset.img_wh[0]]
-        xyz_min_coarse, xyz_max_coarse = compute_bbox_by_cam_frustrm(args, cfg, HW, Ks, poses, near, far)
+    #if len(train_dataset.img_wh)>2:
+    #    HW = train_dataset.img_wh
+    #    xyz_min_coarse, xyz_max_coarse = _compute_bbox_by_cam_frustrm_unbounded(cfg, HW, Ks, poses, far)
+    #else:
+    #    HW = [train_dataset.img_wh[1], train_dataset.img_wh[0]]
+    #    xyz_min_coarse, xyz_max_coarse = compute_bbox_by_cam_frustrm(args, cfg, HW, Ks, poses, near, far)
 
+    WH = train_dataset.img_wh
+    print('compute_bbox_by_cam_frustrm: start')
+    if cfg["unbounded_inward"]:
+        xyz_min_coarse, xyz_max_coarse = _compute_bbox_by_cam_frustrm_unbounded(
+                cfg, WH, Ks, poses, cfg["near_clip"])    
+    else:
+        xyz_min_coarse, xyz_max_coarse = _compute_bbox_by_cam_frustrm_bounded(
+                cfg, WH, Ks, poses, near, far)
+    print('compute_bbox_by_cam_frustrm: xyz_min', xyz_min_coarse)
+    print('compute_bbox_by_cam_frustrm: xyz_max', xyz_max_coarse)
+    print('compute_bbox_by_cam_frustrm: finish')
     
+  
     model = scene_rep_reconstruction(
         args=args, cfg=cfg, xyz_min=xyz_min_coarse, xyz_max=xyz_max_coarse,
         dataset=train_dataset, stage='coarse')
@@ -271,7 +286,10 @@ def get_density_pnts(args, train_dataset, bounded=True):
     dense_xyz = model.xyz_min * (1-interp) + model.xyz_max * interp
     density = model.density(dense_xyz)
     alpha = model.activate_density(density)
-    thres = 1e-4
+    if args.ub360 == 1:
+       thres = 1e-2  # 2e-2
+    else:
+       thres = 1e-4
     mask = (alpha > thres)
     geo = dense_xyz[mask]
     # print("active_xyz", active_xyz.shape)
