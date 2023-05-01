@@ -10,8 +10,19 @@ from .apparatus import *
 from .tensorBase import TensorBase
 from tqdm import tqdm
 
+def vis_box_pca(cluster_raw_pnts, geo, pca_cluster_newpnts, cluster_raw_mean, local_ranges, args, pnt_rmatrix, sep=False, subdir="rot_tensoRF"):
+    for l in range(len(geo)):
+        if not sep:
+            draw_box_pca(geo[l][..., :3], None, local_ranges[l], f'{args.basedir}/{args.expname}', l+1000, args, pnt_rmatrix[l].cuda(), subdir=subdir) 
+        else:
+            draw_sep_box_pca(cluster_raw_pnts[l], geo[l][..., :3], None, local_ranges[l],
+                         f'{args.basedir}/{args.expname}', l, args, pnt_rmatrix[l].cuda(), subdir=subdir)
+def vis_box(geo, args):
+    for l in range(len(geo)):
+        draw_box(geo[l][..., :3], args.local_range[l], f'{args.basedir}/{args.expname}', l)
+
 class PointTensorBase_hier(TensorBase):
-    def __init__(self, aabb, gridSize, device, density_n_comp=8, appearance_n_comp=24, app_dim=27, shadingMode='MLP_PE', alphaMask=None, near_far=[2.0, 6.0], density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, step_ratio=2.0, fea2denseAct='softplus', local_dims=None, geo=None, args=None):
+    def __init__(self, aabb, gridSize, device, density_n_comp=8, appearance_n_comp=24, app_dim=27, shadingMode='MLP_PE', alphaMask=None, near_far=[2.0, 6.0], density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, step_ratio=2.0, fea2denseAct='softplus', local_dims=None, cluster_dict=None, geo=None, args=None, up_stage=0):
         super(TensorBase, self).__init__()
         assert geo is not None, "No geo loaded, when using pointTensorBase"
         self.args = args
@@ -36,25 +47,69 @@ class PointTensorBase_hier(TensorBase):
         self.K_tensoRF = self.max_tensoRF if self.K_tensoRF is None else self.K_tensoRF
         self.KNN = (args.rot_KNN > 0) if args.rot_KNN is not None else (args.KNN > 0)
         self.near_far = near_far
-        self.step_ratio = step_ratio
+        self.step_ratio = step_ratio 
         self.update_stepSize(self.local_dims)
         self.vecMode = [2, 1, 0]
         self.init_svd_volume(local_dims, device)
         self.shadingMode, self.pos_pe, self.view_pe, self.fea_pe, self.featureC = shadingMode, pos_pe, view_pe, fea_pe, featureC
         self.init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, device, app_dim=app_dim[0] if args.radiance_add > 0 else None)
 
+        if cluster_dict is not None:
+            if len(cluster_dict["cluster_xyz"][0]) > 1:
+               self.geo_xyz = [torch.as_tensor(cluster_dict["cluster_xyz"][l][..., :3], device=self.device).contiguous() for l in range(len(cluster_dict["cluster_xyz"]))]
+               self.box_length = cluster_dict["box_length"]
+               self.stds = cluster_dict["stds"]
+            else:
+               self.geo_xyz = [torch.as_tensor(cluster_dict["cluster_xyz"][l][0][..., :3], device=self.device).contiguous() for l in range(len(cluster_dict["cluster_xyz"]))]
+               self.box_length = cluster_dict["box_length"][0]
+               self.stds = cluster_dict["stds"][0]
+            if self.lvl < len(self.geo_xyz):
+                self.geo_xyz = [torch.cat(self.geo_xyz, dim=0).contiguous()]
+                self.box_length = [np.concatenate(self.box_length)]
+                self.stds = [np.concatenate(self.stds)]
+            self.pnt_xyz = self.geo_xyz
+          
+
+            # self.local_range, self.local_dims = self.set_local_range_dim(self.geo_xyz, self.box_length, geo_cluster, pca_cluster_newpnts, pca_axis, self.stds)
+            #self.local_range, self.local_dims = self.set_local_range_dim(self.geo_xyz, self.box_length, None, None, None, self.stds)
+            self.pnt_rmatrix = [torch.transpose(torch.as_tensor(cluster_dict['pca_axis'][l], dtype=torch.float32, device=self.device), 1, 2).contiguous() for l in range(self.lvl)]
+            # vis_box_pca(geo_cluster, self.geo_xyz, pca_cluster_newpnts, cluster_raw_mean, self.local_range, args, self.pnt_rmatrix, sep=False)
+            ####
+            vis_box_pca(cluster_dict["cluster_pnts"], self.geo_xyz, None, None, self.local_range, args, self.pnt_rmatrix, sep=False)
+            #vis_box_pca(cluster_dict["cluster_pnts"], self.geo_xyz, None, None, self.local_range, args, self.pnt_rmatrix, sep=True)
+            ###
+        # initialize tensorf features along x,y,z
+ 
+
+        draw_hier_box(self.pnt_xyz, self.local_range, os.path.join(args.basedir, args.expname), step=0, rot_m=None)
+
+ #       draw_box(self.pnt_xyz[0], self.local_range[0], logfolder, 0, rot_m=None)
+        #exit()
+    def set_local_range_dim(self, geo_xyz, box_length, geo_cluster, pca_cluster_newpnts, pca_axis, stds):
+        local_dims, local_range = [], []
+       
+        for l in range(self.lvl):
+            unit = self.args.local_unit[l]
+            print("unit of level {} is {}".format(self.lvl, unit))
+            dims = np.ceil((box_length[l] * self.args.dilation_ratio[l] - unit) * 0.5  / unit).astype(np.int16)
+            local_dims.append((torch.as_tensor(dims, dtype=torch.int16, device=self.device) * 2 + 1).contiguous())
+            local_range.append(torch.as_tensor((dims+0.5) * unit, dtype=torch.float32, device=self.device).contiguous())
+
+        return local_range, local_dims
+
     def update_stepSize(self, local_dims):
         print("aabb", self.aabb.view(-1))
         self.aabbSize = self.aabb[1] - self.aabb[0]
         self.invaabbSize = 2.0/self.aabbSize
         if self.args.tensoRF_shape == "cube":
-            self.lvl_units = [(2 * self.local_range[l] / local_dims[l,:3]) for l in range(self.lvl)]
+            self.lvl_units = [(2 * self.local_range[l] / local_dims[l]) for l in range(self.lvl)]
             self.units = self.lvl_units[self.args.unit_lvl]
             self.stepSize = torch.mean(self.units) * self.step_ratio
             print(torch.mean(self.units) , self.step_ratio)
             self.gridSize = torch.ceil(self.aabbSize / self.units).long().to(self.device)
             # self.radius = torch.sqrt(torch.sum(torch.square(self.local_range))).cpu().item()
             self.radius = torch.norm(self.local_range, dim=-1).cpu().tolist()
+            #self.radius = [torch.norm(self.local_range[l], dim=-1).type(torch.float32).cuda().contiguous() for l in range(self.lvl)]
             print("radius, furthest shading to tensoRF distance: ", self.radius)
         else:
             print("not implemented")
@@ -76,7 +131,7 @@ class PointTensorBase_hier(TensorBase):
         print("sampling grid size: ", self.gridSize)
         print("nSamples: ", self.nSamples)
         self.create_sample_map()
-
+        
 
     def compute_alpha(self, xyz_locs, length=1, pnt_rmatrix=None):
         if self.alphaMask is not None:
@@ -147,18 +202,35 @@ class PointTensorBase_hier(TensorBase):
             rays_chunk = all_rays[idx_chunk].to(self.device)
 
             rays_o, rays_d = rays_chunk[..., :3], rays_chunk[..., 3:6]
+            #if self.args.ub360 ==1:
+            #     xyz_sampled, _, xyz_inbbox = self.sample_ray_ndc(rays_o, rays_d, N_samples=N_samples, is_train=False)
+            #else:
             xyz_sampled, _, xyz_inbbox = self.sample_ray(rays_o, rays_d, N_samples=N_samples, is_train=False)
 
             if bbox_only:
+                if self.args.ub360 ==1:
+                   vec = torch.where(rays_d == 0, torch.full_like(rays_d, 1e-6), rays_d)
+                   rate_a = (self.aabb[1] - rays_o) / vec
+                   rate_b = (self.aabb[0] - rays_o) / vec
+                   t_min = torch.minimum(rate_a, rate_b).amax(-1)  # .clamp(min=near, max=far)
+                   t_max = torch.maximum(rate_a, rate_b).amin(-1)  # .clamp(min=near, max=far)
+                   mask_inbbox = t_max > t_min
+                   #mask_inbbox = torch.ones_like(t_min)
 
-                vec = torch.where(rays_d == 0, torch.full_like(rays_d, 1e-6), rays_d)
-                rate_a = (self.aabb[1] - rays_o) / vec
-                rate_b = (self.aabb[0] - rays_o) / vec
-                t_min = torch.minimum(rate_a, rate_b).amax(-1)  # .clamp(min=near, max=far)
-                t_max = torch.maximum(rate_a, rate_b).amin(-1)  # .clamp(min=near, max=far)
-                mask_inbbox = t_max > t_min
+                   
+                else:
+                   vec = torch.where(rays_d == 0, torch.full_like(rays_d, 1e-6), rays_d)
+                   rate_a = (self.aabb[1] - rays_o) / vec
+                   rate_b = (self.aabb[0] - rays_o) / vec
+                   t_min = torch.minimum(rate_a, rate_b).amax(-1)  # .clamp(min=near, max=far)
+                   t_max = torch.maximum(rate_a, rate_b).amin(-1)  # .clamp(min=near, max=far)
+                   mask_inbbox = t_max > t_min
 
             else:
+                #if self.args.ub360 ==1:
+                #   vec = torch.where(rays_d == 0, torch.full_like(rays_d, 1e-6), rays_d)
+                #   mask_inbbox = torch.ones_like(vec)
+                #else:
                 mask_inbbox = (self.alphaMask.sample_alpha(xyz_sampled).view(xyz_sampled.shape[:-1]) > 0).any(-1)
             if cvrg:
                 mask_inrange = filter_ray_by_cvrg(xyz_sampled, xyz_inbbox, self.units if self.args.tensoRF_shape == "cube" else self.units_3, self.aabb[0], self.aabb[1], self.tensoRF_cvrg_filter)
@@ -170,6 +242,10 @@ class PointTensorBase_hier(TensorBase):
                 mask_filtered.append((mask_inbbox * mask_inrange).cpu())
                 tensoRF_per_ray_lst.append(tensoRF_per_ray.cpu())
         mask_filtered = torch.cat(mask_filtered).view(all_rays.shape[:-1])
+
+        ### here
+        #mask_filtered = torch.ones_like(mask_filtered)
+
         tensoRF_per_ray = torch.cat(tensoRF_per_ray_lst).view(all_rays.shape[:-1]) if len(tensoRF_per_ray_lst) > 0 else None
 
         if apply_filter:
@@ -203,6 +279,7 @@ class PointTensorBase_hier(TensorBase):
         new_aabb = torch.stack((xyz_min, xyz_max))
 
         total = torch.sum(alpha)
+        #import pdb;pdb.set_trace()
         print(f"bbox: {xyz_min, xyz_max} alpha rest %%%f" % (total / total_voxels * 100))
         return new_aabb
 
@@ -228,14 +305,14 @@ class PointTensorBase_hier(TensorBase):
 
     def filter_by_points(self, xyz_sampled):
         xyz_dist = torch.abs(xyz_sampled[..., None, :] - self.pnt_xyz[None, ...]) # raysampleN * 4096 * 3
-        mask_inrange = torch.all(xyz_dist <= self.local_range[None,None, :], dim=-1) # raysampleN * 4096
+        mask_inrange = torch.all(xyz_dist <= self.local_range[None, None, :], dim=-1) # raysampleN * 4096
         mask_inrange = torch.any(mask_inrange.view(mask_inrange.shape[0], -1), dim=-1)
         return mask_inrange
 
 
     def select_by_points(self, xyz_sampled, ray_id, step_id=None):
         xyz_dist = torch.abs(xyz_sampled[..., None, :] - self.pnt_xyz[None, ...]) # raysampleN * 4096 * 3
-        mask_inrange = torch.all(xyz_dist <= self.local_range[None,None, :], dim=-1) # raysampleN * 4096
+        mask_inrange = torch.all(xyz_dist <= self.local_range[None, None, :], dim=-1) # raysampleN * 4096
         mask_inds = torch.nonzero(mask_inrange)
         # print("mask_inds", mask_inds.shape)
         xyz_sampled = xyz_sampled[mask_inds[..., 0], ...]
@@ -257,7 +334,7 @@ class PointTensorBase_hier(TensorBase):
                     #     torch::Tensor local_range,
                     #     torch::Tensor local_dims, const int max_tensoRF
                     torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
+                    torch.cuda.synchronize()           
                     tensoRF_cvrg_inds, tensoRF_count, tensoRF_topindx = search_geo_hier_cuda.build_tensoRF_map_hier(self.pnt_xyz[l], self.gridSize, self.aabb[0], self.aabb[1], self.units, self.local_range[l], self.local_dims[l], self.max_tensoRF[l])
                 else:
                     print("no implementation")
@@ -327,21 +404,102 @@ class PointTensorBase_hier(TensorBase):
             # elif self.args.rot_init is not None:
             #     pnt_rmatrix = self.rot2m(self.pnt_rot)
             #     ray_pts, mask_valid, ray_id, step_id, N_steps, t_min, t_max = search_geo_cuda.sample_pts_on_rays_rot_cvrg(rays_o, rays_d, self.pnt_xyz, pnt_rmatrix, self.tensoRF_cvrg_inds, self.tensoRF_count, self.tensoRF_topindx, self.units, self.local_range, self.aabb[0], self.aabb[1], near, far, self.stepSize)
-            # else:
-            ray_pts, mask_valid, ray_id, step_id, N_steps, t_min, t_max = search_geo_cuda.sample_pts_on_rays_cvrg(rays_o, rays_d, self.tensoRF_cvrg_filter, self.units, self.aabb[0], self.aabb[1], near, far, self.stepSize)
+            # else:  
+            if self.args.ub360 == 1: 
+  
+               scene_center = (self.aabb[0] + self.aabb[1]) * 0.5
+               scene_radius = (self.aabb[1] - self.aabb[0]) * 0.5
+               #scene_center = torch.tensor([0.0046, -0.1786,  0.4006]).cuda()
+               #scene_radius = torch.tensor([0.7347, 0.7347, 0.7347]).cuda()
+
+               rays_o_aft = (rays_o - scene_center) / scene_radius
+               rays_d_aft = rays_d / rays_d.norm(dim=-1, keepdim=True)
+               
+     
+               bg_len = 0.4
+               world_size = sum((self.aabb[1]-self.aabb[0])**2)
+               
+               
+               #new_bound = torch.tensor([[-4, -4, -4], [4,4,4]], dtype=torch.float).cuda()
+               #N_inner = int(2 / (2+2*bg_len) *  world_size/ self.stepSize) + 1
+
+               N_inner = 150
+               N_outer = N_inner
+               b_inner = torch.linspace(0, 2, N_inner+1)
+               b_outer = 2 / torch.linspace(1, 1/128, N_outer+1)
+               t = torch.cat([ 
+                      (b_inner[1:] + b_inner[:-1]) * 0.5,
+                      (b_outer[1:] + b_outer[:-1]) * 0.5,
+               ])
+              
+               ray_pts = (rays_o_aft[:,None,:].cpu() + rays_d_aft[:,None,:].cpu() * t[None,:,None]).to(dtype=torch.float32)
+              
+    
+               
+               norm = ray_pts.abs().amax(dim=-1, keepdim=True)
+               mask_valid_1 = (norm<=1)
+               ray_pts = torch.where(
+               mask_valid_1,
+               ray_pts,
+               ray_pts / norm * ((1+bg_len) - bg_len/norm)
+               )
+               #np.savetxt('./360stump_shading.txt', np.array(ray_pts.reshape(-1,3).cpu()), delimiter=";")
+               #exit()
+              
+                   
+               ray_id = torch.arange(ray_pts.shape[:2][0]).view(-1,1).expand(ray_pts.shape[:2]).flatten().cuda()
+               step_id = torch.arange(ray_pts.shape[:2][1]).view(1,-1).expand(ray_pts.shape[:2]).flatten().cuda()
+               
+               ray_pts = ray_pts.reshape(-1,3).cuda()
+               t_min = torch.zeros_like(ray_id).cuda()
+               mask_valid = torch.ones_like(step_id,dtype=torch.bool).cuda()
+               stepSize = 0.02
+
+ 
+               ## ray-bbox intersection
+               #vec = torch.where(rays_d_aft == 0, torch.full_like(rays_d_aft, 1e-6), rays_d_aft)
+               #rate_a = (self.aabb[1] - rays_o_aft) / vec 
+               #rate_b = (self.aabb[0] - rays_o_aft) / vec
+               #t_min = torch.minimum(rate_a, rate_b).amax(-1)  # .clamp(min=near, max=far)
+               #t_max = torch.maximum(rate_a, rate_b).amin(-1)  # .clamp(min=near, max=far)
+              
+               ### our cuda implementation, considering tensorf cvrg
+               #ray_pts, mask_valid, ray_id, step_id, N_steps, t_min, t_max = search_geo_cuda.sample_pts_on_rays_cvrg_360(ray_pts, ray_id, step_id, rays_o_aft, rays_d_aft, self.tensoRF_cvrg_filter, self.units, self.aabb[0], self.aabb[1], near, far, stepSize)
+               
+               #ray_pts, mask_valid, ray_id, step_id, N_steps, t_min, t_max = search_geo_cuda.sample_pts_on_rays_cvrg(rays_o_aft, rays_d_aft, self.tensoRF_cvrg_filter, self.units, self.aabb[0], self.aabb[1], near, far, self.stepSize)
+               #mask_valid, ray_id, step_id, N_steps, t_min, t_max = search_geo_cuda.sample_pts_on_rays_cvrg_360(ray_pts, ray_id, step_id, rays_o_aft, rays_d_aft, self.tensoRF_cvrg_filter, self.units, self.aabb[0], self.aabb[1], near, far, self.stepSize)
+               
+              
+               #np.savetxt('./360garden_shading_aft.txt', np.array(ray_pts.cpu()), delimiter=";")
+               #exit()
+               
+        
+               
+               #np.savetxt('./360garden_shading_aft.txt', np.array(ray_pts.cpu()), delimiter=";")
+               #exit()
+              
+               
+               
+
+               
+            else:
+               ray_pts, mask_valid, ray_id, step_id, N_steps, t_min, t_max = search_geo_cuda.sample_pts_on_rays_cvrg(rays_o, rays_d, self.tensoRF_cvrg_filter, self.units, self.aabb[0], self.aabb[1], near, far, self.stepSize)
+               
         elif self.args.tensoRF_shape == "sphere":
             print("no implementation")
-            exit()
+            exit() 
             # assert not random, "random has no implementation for sphere!!!"
             # assert not ji, "ji has no implementation for sphere!!!"
             # assert args.rot_init is None, "args.rot_init has no implementation for sphere!!!"
             ray_pts, mask_valid, ray_id, step_id, N_steps, t_min, t_max = search_geo_cuda.sample_pts_on_rays_sphere_cvrg(rays_o, rays_d, self.pnt_xyz, self.tensoRF_cvrg_inds, self.tensoRF_count, self.tensoRF_topindx, self.units, self.radiusl, self.radiush, self.aabb[0], self.aabb[1], near, far, self.stepSize)
 
+        
         if use_mask:
             ray_pts = ray_pts[mask_valid]
             ray_id = ray_id[mask_valid]
             step_id = step_id[mask_valid]
         # print("t_min", t_min.shape, step_id.shape, ray_pts.shape)
+        
         return ray_pts, t_min, ray_id, step_id, shift, pnt_rmatrix
 
 
@@ -499,10 +657,11 @@ class PointTensorBase_hier(TensorBase):
 
         if ray_id is None or len(ray_id) == 0 or not mask_any:
             return torch.full([N, 3], 1.0 if (white_bg or (is_train and torch.rand((1,)) < 0.5)) else 0.0, device="cuda", dtype=torch.float32), rays_chunk[..., -1].detach(), None, None, None
-
+        
         local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id = self.sample_2_tensoRF_cvrg_hier(xyz_sampled, pnt_rmatrix=pnt_rmatrix, rotgrad=rot_step)
         # print("local_kernel_dist", local_kernel_dist[0].shape, torch.max(local_kernel_dist[0]), torch.min(local_kernel_dist[0]), local_kernel_dist[0])
         sigma_feature = self.compute_densityfeature_geo(local_gindx_s, local_gindx_l, local_gweight_s, local_gweight_l, local_kernel_dist, tensoRF_id, agg_id, sample_num=len(ray_id))
+
         if shift is None:
             alpha = Raw2Alpha.apply(sigma_feature.flatten(), self.density_shift, self.stepSize * self.distance_scale).reshape(sigma_feature.shape)
         else:
@@ -777,8 +936,8 @@ class PointTensorCP_hier(PointTensorBase_hier):
                     infeat = torch.cat([infeat, self.basis_mat[l](app_feat)], dim=-1)
                 else:
                     infeat += self.basis_mat[l](app_feat)
-                    if self.args.rad_lvl_norm > 0:
-                        num_lvl_exist += has_tensorf
+                    if self.args.rad_lvl_norm > 0: 
+                        num_lvl_exist += has_tensorf 
             else:
                 infeat = torch.cat([infeat, torch.zeros([sample_num, self.app_dim[l]], device=infeat.device, dtype=torch.float32)], dim=-1) if self.args.radiance_add == 0 else infeat
         return infeat / torch.clamp(num_lvl_exist, min=1)
