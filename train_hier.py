@@ -1,4 +1,3 @@
-
 import os
 from tqdm.auto import tqdm
 from opt_hier import config_parser
@@ -13,9 +12,10 @@ from renderer import *
 from utils import *
 from torch.utils.tensorboard import SummaryWriter
 import datetime
-
+from models.init_net.run import get_density_pnts
 from dataLoader import dataset_dict
 import sys
+import time
 
 from models.masked_adam import MaskedAdam
 
@@ -55,10 +55,10 @@ def export_mesh(args, geo):
 
 
 @torch.no_grad()
-def render_test(args, geo):
+def render_test(args, cluster_dict, geo, test_dataset, train_dataset):
     # init dataset
-    dataset = dataset_dict[args.dataset_name]
-    test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True)
+    #dataset = dataset_dict[args.dataset_name]
+    #test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True)
     white_bg = test_dataset.white_bg
     ray_type = args.ray_type
 
@@ -93,12 +93,12 @@ def render_test(args, geo):
         evaluation_path(test_dataset,tensorf, c2ws, renderer, f'{logfolder}/{args.expname}/imgs_path_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ray_type=ray_type,device=device)
 
-def reconstruction(args, geo):
+def reconstruction(args, cluster_dict, geo, test_dataset, train_dataset):
 
     # init dataset
-    dataset = dataset_dict[args.dataset_name]
-    train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False, rnd_ray=args.rnd_ray, args=args)
-    test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True, args=args)
+    #dataset = dataset_dict[args.dataset_name]
+    #train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False, rnd_ray=args.rnd_ray, args=args)
+    #test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True, args=args)
     if geo is None:
         geo = [train_dataset.center[None, :]]
 
@@ -122,6 +122,7 @@ def reconstruction(args, geo):
 
     # init parameters
     # tensorVM, renderer = init_parameters(args, train_dataset.scene_bbox.to(device), reso_list[0])
+   
     aabb = train_dataset.scene_bbox.to(device)
     if args.ckpt is not None:
         ckpt = torch.load(args.ckpt, map_location=device)
@@ -136,7 +137,7 @@ def reconstruction(args, geo):
             alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift,
             distance_scale=args.distance_scale, pos_pe=args.pos_pe, view_pe=args.view_pe,
             fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
-            fea2denseAct=args.fea2denseAct, local_dims=args.local_dims_init, geo=geo, args=args)
+            fea2denseAct=args.fea2denseAct, local_dims=args.local_dims_init, cluster_dict=cluster_dict, geo=geo, args=args)
 
     skip_zero_grad = args.skip_zero_grad
     grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis, skip_zero_grad = skip_zero_grad > 0)
@@ -155,6 +156,7 @@ def reconstruction(args, geo):
     dim_lst = []
     # set upsample voxel dims
     if args.local_dims_trend is not None:
+        
         assert args.upsamp_list is not None and len(args.upsamp_list) == len(args.local_dims_trend[0]), "args.local_dims_trend and args.upsamp_list mismatch "
         for i in range(len(args.local_dims_trend)):
             level_dim_lst = []
@@ -187,6 +189,13 @@ def reconstruction(args, geo):
             allalpha = train_dataset.all_alpha[mask_filtered]
             allijs = train_dataset.ijs[mask_filtered]
             allc2ws = train_dataset.c2ws[mask_filtered]
+    else:
+        mask_filtered, tensoRF_per_ray = tensorf.filtering_rays(allrays, allrgbs, bbox_only=True)
+        allrays, allrgbs = allrays[mask_filtered], allrgbs[mask_filtered]
+        if args.rnd_ray > 0:
+            allalpha = train_dataset.all_alpha[mask_filtered]
+            allijs = train_dataset.ijs[mask_filtered]
+            allc2ws = train_dataset.c2ws[mask_filtered]
     trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
 
     Ortho_reg_weight = args.Ortho_weight
@@ -202,11 +211,13 @@ def reconstruction(args, geo):
 
     shrink_list = [update_AlphaMask_list[0]] if args.shrink_list is None else args.shrink_list
     filter_ray_list = [update_AlphaMask_list[1]] if args.filter_ray_list is None else args.filter_ray_list
+    
     new_aabb = None
     cur_rot_step = False
     rot_step = args.rot_step
     upsamp_reset_list = args.upsamp_reset_list if args.upsamp_reset_list is not None else [0 for i in range(len(args.upsamp_list))]
 
+    time_start = time.time()
     for iteration in pbar:
 
         ray_idx = trainingSampler.nextids()
@@ -233,6 +244,12 @@ def reconstruction(args, geo):
         rgb_map, weights, depth_map, rgbpers, ray_ids = renderer(rays_train, tensorf, chunk=args.batch_size, N_samples=-1, white_bg = white_bg, ray_type=ray_type, device=device, is_train=True, tensoRF_per_ray=tensoRF_per_ray_train, rot_step=cur_rot_step)
 
         loss = torch.mean((rgb_map - rgb_train) ** 2)
+      
+        ##### density visualization
+        #if iteration == 7000:
+        #    np.savetxt('./lego_cp.txt', np.array(xyz_sampled.cpu()), delimiter=";")
+            
+        
 
         # loss
         total_loss = loss
@@ -295,11 +312,13 @@ def reconstruction(args, geo):
 
 
         if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
+          if args.render_test:
             # test_dataset
             PSNRs_test = evaluation(test_dataset, tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis, prtx=f'{iteration:06d}_', N_samples=-1, white_bg = white_bg, ray_type=ray_type, compute_extra_metrics=False)
             # summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
-
-
+          if args.render_train:
+            train_dataset_1 = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=True, rnd_ray=args.rnd_ray, args=args)
+            PSNRs_test = evaluation(train_dataset_1, tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis, prtx=f'{iteration:06d}_', N_samples=-1, white_bg = white_bg, ray_type=ray_type, compute_extra_metrics=False)
         if update_AlphaMask_list is not None and iteration in update_AlphaMask_list:
             new_aabb = tensorf.updateAlphaMask()
 
@@ -310,24 +329,26 @@ def reconstruction(args, geo):
             print("continuing L1_reg_weight", L1_reg_weight)
 
 
-        if args.ray_type != 1 and iteration in filter_ray_list:
-            # filter rays outside the bbox
-            mask_filtered, tensoRF_per_ray = tensorf.filtering_rays(allrays, allrgbs)
-            tensoRF_per_ray = None if tensoRF_per_ray is None else tensoRF_per_ray.to(device)
-            allrays, allrgbs = allrays[mask_filtered], allrgbs[mask_filtered]
-            if args.rnd_ray > 0:
-                allalpha = allalpha[mask_filtered]
-                allijs = allijs[mask_filtered]
-                allc2ws = allc2ws[mask_filtered]
+        #if args.ray_type != 1 and iteration in filter_ray_list:
+        #    # filter rays outside the bbox
+        #    mask_filtered, tensoRF_per_ray = tensorf.filtering_rays(allrays, allrgbs)
+        #    tensoRF_per_ray = None if tensoRF_per_ray is None else tensoRF_per_ray.to(device)
+        #    allrays, allrgbs = allrays[mask_filtered], allrgbs[mask_filtered]
+        #    if args.rnd_ray > 0:
+        #        allalpha = allalpha[mask_filtered]
+        #        allijs = allijs[mask_filtered]
+        #        allc2ws = allc2ws[mask_filtered]
 
+        #    trainingSampler = SimpleSampler(allrgbs.shape[0], args.batch_size)
+    
 
-            trainingSampler = SimpleSampler(allrgbs.shape[0], args.batch_size)
 
 
         if args.upsamp_list is not None and iteration in args.upsamp_list:
             local_dims = local_dim_list.pop(0)
             reset = upsamp_reset_list.pop(0) > 0
-
+            #up_stage+=1
+            #tensorf.up_stage = up_stage
             tensorf.upsample_volume_grid(local_dims, reset_feat=reset)
 
             if args.lr_upsample_reset:
@@ -340,11 +361,15 @@ def reconstruction(args, geo):
             if args.rotgrad > 0:
                 geo_optimizer = torch.optim.Adam(tensorf.get_geoparam_groups(args.lr_geo_init * lr_scale), betas=(0.9,0.99), weight_decay=0.0)
     tensorf.save(f'{logfolder}/{args.expname}.th')
-
+    time_end = time.time()
+    time_sum = time_end - time_start
+    time_np = np.array([0])
+    time_np[0] = time_sum
+    print(f'time = {time_sum}')
 
     if args.render_train:
         os.makedirs(f'{logfolder}/imgs_train_all', exist_ok=True)
-        train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=True)
+        #train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=True)
         PSNRs_test = evaluation(train_dataset, tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ray_type=ray_type,device=device)
         print(f'======> {args.expname} test all psnr: {np.mean(PSNRs_test)} <========================')
@@ -361,6 +386,12 @@ def reconstruction(args, geo):
         print('========>',c2ws.shape)
         os.makedirs(f'{logfolder}/imgs_path_all', exist_ok=True)
         evaluation_path(test_dataset, tensorf, c2ws, renderer, f'{logfolder}/imgs_path_all/', N_vis=-1, N_samples=-1, white_bg = white_bg, ray_type=ray_type,device=device)
+    #time_end = time.time()
+    #time_sum = time_end - time_start
+    #time_np = np.array([0])
+    #time_np[0] = time_sum
+    #print(f'time = {time_sum}')
+    np.savetxt(f'{logfolder}/time.txt', np.array(time_np))
 
 def add_dim(obj, times, div=False):
     if obj is None:
@@ -395,21 +426,73 @@ def comp_revise(args):
     print("n_lamb_sh", args.n_lamb_sh)
     print("vox_range", args.vox_range)
     return args
-
+  
 if __name__ == '__main__':
 
     torch.set_default_dtype(torch.float32)
     torch.manual_seed(20211202)
     np.random.seed(20211202)
     args = comp_revise(args)
+    dataset = dataset_dict[args.dataset_name]
+     
+    test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True, args=args)
+    train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False, rnd_ray=False, args=args)
 
-    geo = gen_geo(args) if args.use_geo > 0 else None
+    # dvgo to get points
+    if args.ub360 == 1:
+        #pnts = torch.tensor(np.loadtxt('./log/garden_DVGO.txt', delimiter=";"), dtype=torch.float32).cuda()
+        #pnts = torch.tensor(np.load('./log/360_garden/garden_vox.npy')).cuda()
+        #pnts = torch.tensor(np.loadtxt('./garden_coarse_dgvo.txt', delimiter=";"), dtype=torch.float32).cuda()
+        #pnts = torch.tensor(np.loadtxt('./stump_coarse_dgvo_o.txt', delimiter=";"), dtype=torch.float32).cuda()
+        #pnts = torch.tensor(np.loadtxt('/home/gqk/cloud_tensoRF/room_coarse_dvgo.txt', delimiter=";"), dtype=torch.float32).cuda()
+        #pnts = torch.tensor(np.loadtxt('./bicycle_coarse_dgvo.txt', delimiter=";"), dtype=torch.float32).cuda()
+        #pnts = torch.tensor(np.loadtxt('/home/gqk/cloud_tensoRF/bonsai_dgvo.txt', delimiter=";"), dtype=torch.float32).cuda()
+        a=1 
+    elif args.datadir.split('/')[3] == 'Barn':
+        pnts = torch.tensor(np.load('./log/Barn_vox.npy')).cuda()
+    elif args.datadir.split('/')[3] == 'Caterpillar':
+        pnts = torch.tensor(np.load('./log/Caterpillar_vox.npy')).cuda()
+    else:
+        pnts = get_density_pnts(args, train_dataset) if args.use_geo < 0 else None
+        
+  
+    pnts = get_density_pnts(args, train_dataset) if args.use_geo < 0 else None
+    
+    #np.savetxt('./room_coarse_dvgo.txt', np.array(pnts.cpu()), delimiter=";")
+    #exit()
+    #import pdb;pdb.set_trace()
 
+    #np.savetxt('./ficus_dgvo.txt', np.array(pnts.cpu()), delimiter=";")
+    #np.savetxt('./hotdog_dgvo.txt', np.array(pnts.cpu()), delimiter=";")
+    #np.savetxt('./lego_dgvo.txt', np.array(pnts.cpu()), delimiter=";")
+    #np.savetxt('./materials_dgvo.txt', np.array(pnts.cpu()), delimiter=";")
+    #np.savetxt('./mic_dgvo.txt', np.array(pnts.cpu()), delimiter=";")
+    #np.savetxt('./ship_dgvo.txt', np.array(pnts.cpu()), delimiter=";")
+
+    #garden = np.load('./log/360_garden/garden_vox.npy')
+    #np.savetxt('./360garden_dgvo.txt', np.array(garden), delimiter=";")
+    
+
+    #np.save('./log/360_garden/garden_vox.npy', np.array(pnts.cpu()))
+    
+    #if args.datadir[-6:] == 'garden':
+    #pnts = torch.tensor(np.loadtxt('./lego_cp.txt', delimiter=";"), dtype=torch.float32).cuda()
+    #else:
+    #   pnts = get_density_pnts(args, train_dataset) if args.use_geo < 0 else None
+
+    #pnts = torch.tensor(np.load('/home/gqk/cloud_tensoRF/log/Barn_vox.npy')).to(device)
+    #pnts = torch.tensor(np.load('/home/gqk/cloud_tensoRF/log/Caterpillar_vox.npy')).cuda()
+
+    cluster_dict, geo = gen_geo(args, pnts) #if args.use_geo > 0 else None
+    
+    del pnts
+    torch.cuda.empty_cache()
+    
     if args.export_mesh:
         export_mesh(args, geo)
 
     if args.render_only and (args.render_test or args.render_path):
-        render_test(args, geo)
+        render_test(args, cluster_dict, geo, test_dataset, train_dataset)
     else:
-        reconstruction(args, geo)
+        reconstruction(args, cluster_dict, geo, test_dataset, train_dataset)
 

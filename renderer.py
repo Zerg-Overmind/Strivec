@@ -3,9 +3,10 @@ from tqdm.auto import tqdm
 from dataLoader.ray_utils import get_rays
 from models.tensoRF import TensorVM, TensorCP, raw2alpha, TensorVMSplit, AlphaGridMask
 from models.pointTensoRF import PointTensorCP
-from models.pointTensoRF_hier import PointTensorCP_hier
+from models.Strivec_hier import StrivecCP_hier
 from models.pointTensoRF_adapt import PointTensorCP_adapt
-from models.pointTensoRF_dbasis import PointTensor_DBaseVMGS #,PointTensor_DBase
+from models.pointTensoRF_dbasis_inds import PointTensor_DBaseVMGS, PointTensor_DBase 
+#from models.pointTensoRF_dbasis import PointTensor_DBaseVMGS ,PointTensor_DBase
 from models.archive_pointTensoRF import PointTensorCPB, PointTensorCPD, PointTensorVMSplit
 from utils import *
 from dataLoader.ray_utils import ndc_rays_blender
@@ -31,8 +32,8 @@ def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ray_typ
             rgbpers.append(rgbper)
             ray_ids.append(ray_id)
             weights.append(weight) 
-
-    return torch.cat(rgbs), torch.cat(weights) if len(weights) > 0 else None, torch.cat(depth_maps) if return_depth else None, torch.cat(rgbpers) if len(rgbpers) > 0 else None, torch.cat(ray_ids) if len(ray_ids) > 0 else None
+    
+    return torch.cat(rgbs) if len(rgbs) > 0 else None, torch.cat(weights) if len(weights) > 0 else None, torch.cat(depth_maps) if return_depth else None, torch.cat(rgbpers) if len(rgbpers) > 0 else None, torch.cat(ray_ids) if len(ray_ids) > 0 else None
 
 
 # def den_eval(geo, dataset, allrays, allrgbs, tensorf, args, renderer, N_samples=-1, white_bg=True, ray_type=0,
@@ -50,6 +51,7 @@ def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ray_typ
 def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, prtx='', N_samples=-1,
                white_bg=False, ray_type=0, compute_extra_metrics=True, device='cuda'):
     PSNRs, rgb_maps, depth_maps = [], [], []
+    gt_maps = []
     ssims,l_alex,l_vgg=[],[],[]
     os.makedirs(savePath, exist_ok=True)
     os.makedirs(savePath+"/rgbd", exist_ok=True)
@@ -87,8 +89,8 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
         else:
             W, H = test_dataset.img_wh
            
-         
-        W, H = W - 2 * args.test_margin, H - 2 * args.test_margin
+        if args.dataset_name == 'scannet':  
+           W, H = W - 2 * args.test_margin, H - 2 * args.test_margin
 
         rays = samples.view(-1, samples.shape[-1])
             
@@ -114,6 +116,8 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
             loss = torch.mean((rgb_map - gt_rgb) ** 2)
             PSNRs.append(-10.0 * np.log(loss.item()) / np.log(10.0))
 
+            #print(f'======> psnr: {PSNRs} <========================')
+
             if compute_extra_metrics:
                 ssim = rgb_ssim(rgb_map, gt_rgb, 1)
                 l_a = rgb_lpips(gt_rgb.numpy(), rgb_map.numpy(), 'alex', tensorf.device)
@@ -126,10 +130,18 @@ def evaluation(test_dataset, tensorf, args, renderer, savePath=None, N_vis=5, pr
         # rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
         rgb_maps.append(rgb_map)
         depth_maps.append(depth_map)
+
+        ### print gt images
+        #gt_map = (gt_rgb.numpy() * 255).astype('uint8')
+        #gt_maps.append(gt_map)
+ 
         if savePath is not None:
             imageio.imwrite(f'{savePath}/{prtx}{idx:03d}.png', rgb_map)
             rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.png', rgb_map)
+
+            #imageio.imwrite(f'{savePath}/{idx:03d}_gt.png', gt_map)
+
 
     if PSNRs:
         psnr = np.mean(np.asarray(PSNRs))

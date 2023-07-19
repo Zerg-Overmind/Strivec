@@ -26,8 +26,8 @@ def config_parser(cmd=None):
     parser.add_argument('--with_depth', action='store_true')
     parser.add_argument('--downsample_train', type=float, default=1.0)
     parser.add_argument('--downsample_test', type=float, default=1.0)
-    parser.add_argument('--model_name', type=str, default='PointTensorCP',
-                        choices=['PointTensorCP', 'PointTensorCP_hier','PointTensorCPB' ,'PointTensorCPD', 'PointTensorVMSplit'])
+    parser.add_argument('--model_name', type=str, default='StrivecCP_hier',
+                        choices=['PointTensorCP', 'StrivecCP_hier','PointTensorCPB' ,'PointTensorCPD', 'PointTensorVMSplit'])
     parser.add_argument('--gpu_ids',
                         type=str,
                         default='0',
@@ -272,6 +272,7 @@ def config_parser(cmd=None):
                         help='frequency of visualize the image')
 
     parser.add_argument("--ub360", type=int, default=0, help='unbounded inward_facing or not')
+    parser.add_argument("--indoor", type=int, default=0, help='indoor or outdoor')
     ########################### args for dvgo initialization ##########################
 
     parser.add_argument("--pre_num_voxels", type=int, default=1024000, help='N num voxel in dvgo initialization')
