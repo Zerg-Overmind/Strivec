@@ -18,7 +18,7 @@ def config_parser(cmd=None):
                         help='input data directory')
     parser.add_argument("--pointfile", type=str, default='./data/llff/fern',
                         help='input data directory')
-    parser.add_argument("--pretrained_mvs_ckpt", type=str, default="/home/xharlie/user_space/codes/MVSNet/model_000014.ckpt",
+    parser.add_argument("--pretrained_mvs_ckpt", type=str, default="/yours/MVSNet/model_000014.ckpt",
                         help='checkpoints of the pretrained_mvs network')
     parser.add_argument("--progress_refresh_rate", type=int, default=10,
                         help='how many iterations to show psnrs or iters')
@@ -27,7 +27,7 @@ def config_parser(cmd=None):
     parser.add_argument('--downsample_train', type=float, default=1.0)
     parser.add_argument('--downsample_test', type=float, default=1.0)
     parser.add_argument('--model_name', type=str, default='StrivecCP_hier',
-                        choices=['PointTensorCP', 'StrivecCP_hier','PointTensorCPB' ,'PointTensorCPD', 'PointTensorVMSplit'])
+                        choices=['PointTensorCP', 'StrivecCP_hier','PointTensorCPB' ,'PointTensorCPD', 'StrivecVMSplit'])
     parser.add_argument('--gpu_ids',
                         type=str,
                         default='0',

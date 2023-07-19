@@ -24,7 +24,7 @@ def vis_box(geo, args):
 class StrivecBase_hier(TensorBase):
     def __init__(self, aabb, gridSize, device, density_n_comp=8, appearance_n_comp=24, app_dim=27, shadingMode='MLP_PE', alphaMask=None, near_far=[2.0, 6.0], density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001, pos_pe=6, view_pe=6, fea_pe=6, featureC=128, step_ratio=2.0, fea2denseAct='softplus', local_dims=None, cluster_dict=None, geo=None, args=None, up_stage=0):
         super(TensorBase, self).__init__()
-        assert geo is not None, "No geo loaded, when using pointTensorBase"
+        assert geo is not None, "No geo loaded"
         self.args = args
         self.geo = geo
         self.pnt_xyz = [geo_lvl[..., :3].cuda().contiguous() for geo_lvl in self.geo]

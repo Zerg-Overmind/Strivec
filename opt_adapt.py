@@ -27,7 +27,7 @@ def config_parser(cmd=None):
     parser.add_argument('--downsample_train', type=float, default=1.0, help="downsample image size")
     parser.add_argument('--downsample_test', type=float, default=1.0, help="downsample image size")
     parser.add_argument('--model_name', type=str, default='PointTensorCP',
-                        choices=['PointTensorCP', 'PointTensorCP_hier', 'PointTensorCP_adapt', 'PointTensorCPB' ,
+                        choices=['PointTensorCP', 'StrivecCP_hier', 'StrivecCP_adapt', 'PointTensorCPB' ,
                                  'PointTensorCPD', 'PointTensorVMSplit'])
     parser.add_argument('--gpu_ids',
                         type=str,

@@ -27,11 +27,43 @@ def config_parser(cmd=None):
     parser.add_argument('--downsample_train', type=float, default=1.0)
     parser.add_argument('--downsample_test', type=float, default=1.0)
     parser.add_argument('--model_name', type=str, default='PointTensorCP',
-                        choices=['PointTensorCP', 'PointTensorCP_hier','PointTensorCPB' ,'PointTensorCPD', 'PointTensorVMSplit', 'PointTensor_DBase', 'PointTensor_DBaseVMGS'])
+                        choices=['PointTensorCP', 'StrivecCP_hier','PointTensorCPB' ,'PointTensorCPD', 'StrivecVMSplit', 'Strivec_DBase', 'Strivec_DBaseVMGS'])
     parser.add_argument('--gpu_ids',
                         type=str,
                         default='0',
                         help='gpu ids: e.g. 0  0,1,2, 0,2. use -1 for CPU')
+
+
+    parser.add_argument("--ub360", type=int, default=0, help='unbounded inward_facing or not')
+    parser.add_argument("--indoor", type=int, default=0, help='indoor or outdoor')
+    # dvgo options
+    ########################### args for dvgo initialization ##########################
+    parser.add_argument("--pre_N_iters", type=int, default=5000, help='in pre den, number of optimization steps')
+    parser.add_argument("--pre_num_voxels", type=int, default=1024000, help='N num voxel in dvgo initialization')
+    parser.add_argument("--pre_batch_size", type=int, default=8192, help='batch size in dvgo initialization')
+    parser.add_argument("--pervoxel_lr", type=int, default=1, help='view-count-based lr')
+    parser.add_argument("--pre_maskout_near_cam_vox", type=int, default=0, help='maskout grid points that between cameras and their near planes')
+    parser.add_argument("--pre_alpha_init", type=float, default=1e-6, help='set the alpha values everywhere at the begin of training')
+    parser.add_argument("--pre_lrate_decay", type=int, default=20, help='lr decay by 0.1 after every lrate_decay*1000 steps')
+    parser.add_argument("--pre_lrate_density", type=float, default=1e-1, help='lr of density voxel grid')
+    parser.add_argument("--pre_lrate_k0", type=float, default=1e-1, help='lr of color/feature voxel grid')
+    parser.add_argument("--decay_after_scale", type=float, default=1.0, help='decay act_shift after scaling')
+    parser.add_argument("--pre_weight_entropy_last", type=float, default=0.01, help='decay act_shift after scaling')
+    parser.add_argument("--pre_weight_rgbper", type=float, default=0.1, help='weight of per-point rgb loss')
+    parser.add_argument("--pre_maskout_lt_nviews", type=int, default=0, help='N images to vis')
+    parser.add_argument(
+        '--pre_pg_scale',
+        type=int,
+        nargs='+',
+        default=[],
+        help='steps for progressive scaling'
+    )
+    parser.add_argument("--world_bound_scale", type=float, default=1.0,
+                        help='scale up the bbox of scene')
+
+
+
+    
     # mvs options
     parser.add_argument('--mvs_model', type=str, default='mvs_points',
                         choices=['mvs_points'])

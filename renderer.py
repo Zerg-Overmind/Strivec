@@ -1,13 +1,14 @@
 import torch,os,imageio,sys
 from tqdm.auto import tqdm
 from dataLoader.ray_utils import get_rays
-from models.tensoRF import TensorVM, TensorCP, raw2alpha, TensorVMSplit, AlphaGridMask
-from models.pointTensoRF import PointTensorCP
+#from models.tensoRF import TensorVM, TensorCP, raw2alpha, TensorVMSplit, AlphaGridMask
+#from models.pointTensoRF import PointTensorCP
+#from models.pointTensoRF_adapt import PointTensorCP_adapt
+#from models.pointTensoRF_dbasis_inds import PointTensor_DBaseVMGS, PointTensor_DBase 
+#from models.archive_pointTensoRF import PointTensorCPB, PointTensorCPD, PointTensorVMSplit
 from models.Strivec_hier import StrivecCP_hier
-from models.pointTensoRF_adapt import PointTensorCP_adapt
-from models.pointTensoRF_dbasis_inds import PointTensor_DBaseVMGS, PointTensor_DBase 
-#from models.pointTensoRF_dbasis import PointTensor_DBaseVMGS ,PointTensor_DBase
-from models.archive_pointTensoRF import PointTensorCPB, PointTensorCPD, PointTensorVMSplit
+from models.Strivec_adapt import StrivecCP_adapt
+from models.Strivec_dbasis_inds import Strivec_DBaseVMGS, Strivec_DBase
 from utils import *
 from dataLoader.ray_utils import ndc_rays_blender
 import random
