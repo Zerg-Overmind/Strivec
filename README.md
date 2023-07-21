@@ -1,4 +1,9 @@
 # Strivec: Sparse Tri-Vector Radiance Fields
+<img src="images/USC-Logos.png" width=120px /><img src="./images/Adobe-Logos.png" width=120px /><img src="./images/ucsd_logo.png" width=120px />
+
+[Project Sites](https://github.com/Zerg-Overmind/Strivec/)
+ | [Paper](https://github.com/Zerg-Overmind/Strivec/)
+
 ## run training
 ```
 python train_adapt.py --config configs/adapt_ship/ship_adapt_0.4_0.2.txt
