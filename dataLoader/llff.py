@@ -10,6 +10,53 @@ from .ray_utils import *
 from tqdm import tqdm
 import scipy
 
+def unpad_poses(p):
+  """Remove the homogeneous bottom row from [..., 4, 4] pose matrices."""
+  return p[..., :3, :4]
+  
+def pad_poses(p):
+  """Pad [..., 3, 4] pose matrices with a homogeneous bottom row [0,0,0,1]."""
+  bottom = np.broadcast_to([0, 0, 0, 1.], p[..., :1, :4].shape)
+  return np.concatenate([p[..., :3, :4], bottom], axis=-2)
+
+def transform_poses_pca(poses):
+  """Transforms poses so principal components lie on XYZ axes.
+
+  Args:
+    poses: a (N, 3, 4) array containing the cameras' camera to world transforms.
+
+  Returns:
+    A tuple (poses, transform), with the transformed poses and the applied
+    camera_to_world transforms.
+  """
+  t = poses[:, :3, 3]
+  t_mean = t.mean(axis=0)
+  t = t - t_mean
+
+  eigval, eigvec = np.linalg.eig(t.T @ t)
+  # Sort eigenvectors in order of largest to smallest eigenvalue.
+  inds = np.argsort(eigval)[::-1]
+  eigvec = eigvec[:, inds]
+  rot = eigvec.T
+  if np.linalg.det(rot) < 0:
+    rot = np.diag(np.array([1, 1, -1])) @ rot
+
+  transform = np.concatenate([rot, rot @ -t_mean[:, None]], -1)
+  poses_recentered = unpad_poses(transform @ pad_poses(poses))
+  transform = np.concatenate([transform, np.eye(4)[3:]], axis=0)
+
+  # Flip coordinate system if z component of y-axis is negative
+  if poses_recentered.mean(axis=0)[2, 1] < 0:
+    poses_recentered = np.diag(np.array([1, -1, -1])) @ poses_recentered
+    transform = np.diag(np.array([1, -1, -1, 1])) @ transform
+
+  # Just make sure it's it in the [-1, 1]^3 cube
+  scale_factor = 1. / np.max(np.abs(poses_recentered[:, :3, 3]))
+  poses_recentered[:, :3, 3] *= scale_factor
+  transform = np.diag(np.array([scale_factor] * 3 + [1])) @ transform
+
+  return poses_recentered, transform
+
 def get_rays_ub360(H, W, K, c2w, inverse_y=None, flip_x=None, flip_y=None, mode='center'):
     i, j = torch.meshgrid(
         torch.linspace(0, W-1, W, device=c2w.device),
@@ -300,7 +347,7 @@ class LLFFDataset(Dataset):
 
         #         self.near_far = [np.min(self.near_fars[:,0]),np.max(self.near_fars[:,1])]
         
-        self.near_far = [0, 3]
+        self.near_far = [0.1, 2.5]
         self.scene_bbox = torch.tensor([[-2.5, -2.5, -2.5], [2.5, 2.5, 2.5]]) # garden
         #self.scene_bbox = torch.tensor([[-1.5, -1.5, -1.5], [1.5, 1.5, 1.5]]) # stump
         self.center = torch.mean(self.scene_bbox, dim=0).float().view(1, 1, 3)
@@ -335,32 +382,30 @@ class LLFFDataset(Dataset):
         if args.ub360 == 1:
           sh = imageio.imread(self.image_paths[0]).shape
           poses[:,:2, 4] = np.array(sh[:2]).reshape([2, 1]).squeeze()
-          poses[:, 2, 4] = poses[:, 2, 4] * 1./args.downsample_train
-          poses = np.concatenate([poses[..., 1:2], -poses[..., :1], poses[..., 2:]], -1)
-          sc = 1./(bds.min() * 0.75)
-          poses[:,:3,3] *= sc
-          bds *= sc
-          self.near_clip = max(np.ndarray.min(bds) * .9, 0)
-          poses = recenter_poses(poses)
+          poses[:, 2, 4] = poses[:, 2, 4] * 1./self.downsample
+          poses = np.concatenate([poses[..., 1:2], -poses[..., :1], poses[..., 2:]], -1)       
+          sc = 1./(self.near_fars.min() * 0.75)
+          poses[:,:3,3] *= sc    
+          self.poses = recenter_poses(poses)
+          
         else:
           poses = np.concatenate([poses[..., 1:2], -poses[..., :1], poses[..., 2:4]], -1)
           # (N_images, 3, 4) exclude H, W, focal
-          self.poses, self.pose_avg = center_poses(poses, self.blender2opencv)
-    
-        #self.poses, self.pose_avg = transform_poses_pca(poses)
-     
-        # Step 3: correct scale so that the nearest depth is at a little more than 1.0
-        # See https://github.com/bmild/nerf/issues/34
-        if args.ub360 != 1:
+          self.poses, self.pose_avg = center_poses(poses, self.blender2opencv)   
+          # Step 3: correct scale so that the nearest depth is at a little more than 1.0
+          # See https://github.com/bmild/nerf/issues/34
           near_original = self.near_fars.min()
           scale_factor = near_original * 0.75  # 0.75 is the default parameter
           # the nearest depth is at 1/0.75=1.33
           self.near_fars /= scale_factor
           self.poses[..., 3] /= scale_factor
        
-        if args.ub360 == 1:
-           poses, bd = spherify_poses(poses, bds)
-           self.poses = rerotate_poses(poses)
+       
+        if args.ub360 == 1 and args.indoor == 1:
+           self.poses, bd = spherify_poses(self.poses, self.near_fars)
+           self.poses = rerotate_poses(self.poses)
+           self.near_clip = max(np.ndarray.min(bd) * .9, 0) 
+           #a=1
         # build rendering path
         N_views, N_rots = 120, 2
         tt = self.poses[:, :3, 3]  # ptstocam(poses[:3,3,:].T, c2w).T

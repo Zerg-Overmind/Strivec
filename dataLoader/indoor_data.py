@@ -7,9 +7,9 @@ from PIL import Image
 from torchvision import transforms as T
 from .data_utils import *
 import sys
-models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../models")
+models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../models/")
 sys.path.append(models_dir)
-from apparatus import draw_ray
+from apparatus import draw_ray, draw_box
 from .ray_utils import *
 from plyfile import PlyData
 
@@ -23,13 +23,14 @@ class IndoorDataset(Dataset):
         self.downsample = downsample
         self.define_transforms()
 
-        self.scene_bbox = torch.tensor([[-30.0, -30.0, -30.0], [20.0, 20.0, 20.0]])  # 10
+        self.scene_bbox = torch.tensor([[-51.2, -51.2, -51.2], [25.8, 25.8, 25.8]])  # [-51.2, -51.2, -1.5], [25.8, 25.8, 25.8]
         self.blender2opencv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+        self.opengl = np.array([[1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, -1], [1, 1, 1, 1]])
         self.read_meta()
         #self.define_proj_mat()
 
-        self.white_bg = True
-        self.near_far = [1 , 80.0]
+        self.white_bg = False
+        self.near_far = [0, 50.0]
 
         self.unbounded_inward = False
         self.unbounded_inner_r = 0.0
@@ -39,14 +40,14 @@ class IndoorDataset(Dataset):
         self.ndc = False
         self.near_clip = None
         self.irregular_shape = False
-
+ 
 
         self.center = torch.mean(self.scene_bbox, axis=0).float().view(1, 1, 3)
         self.radius = (self.scene_bbox[1] - self.center).float().view(1, 1, 3)
         self.downsample=downsample
 
     def read_depth(self, filename):
-        depth = np.array(read_pfm(filename)[0], dtype=np.float32)  # not (800, 800), no depth map in indoor_scenes
+        depth = np.array(read_pfm(filename)[0], dtype=np.float32)  # not (800, 800), no depth map in enes
         return depth
     
     def read_meta(self):
@@ -68,24 +69,37 @@ class IndoorDataset(Dataset):
             trans_mtrx = f1.readlines()
         transform_matrix_raw = trans_mtrx[2:1612]
 
-        for meta_num in range(len(meta_raw)):
-            img_idx.append(meta_raw[meta_num].split()[0])
-            img_w.append(np.array(meta_raw[meta_num].split()[1]))
-            img_h.append(np.array(meta_raw[meta_num].split()[2]))
+        # list of train data or test data
+        with open(os.path.join(self.root_dir, f"{self.split}_list.txt"), 'r') as f_lst:
+            lst = f_lst.readlines()
+
+        ## plot scene box
+        #logfolder = '/home/gqk/cloud_tensoRF/log/indoor_scnenes'
+        #center = (self.scene_bbox[0]+self.scene_bbox[1])/2
+        #box_range = (self.scene_bbox[1]-self.scene_bbox[0])/2
+        #draw_box(center, box_range, logfolder, 0, rot_m=None) 
+  
+        for meta_num in range(len(lst)):
+            img_idx.append(meta_raw[int(lst[meta_num])].split()[0])
+            img_w.append(np.array(meta_raw[int(lst[meta_num])].split()[1]))
+            img_h.append(np.array(meta_raw[int(lst[meta_num])].split()[2]))
             
-            R_matrix.append([np.array(transform_matrix_raw[meta_num*5+1].split()), np.array(transform_matrix_raw[meta_num*5+2].split()), np.array(transform_matrix_raw[meta_num*5+3].split()), np.array([0,0,0])])
-            tt = transform_matrix_raw[meta_num*5+4].split()
+            R_matrix.append([np.array(transform_matrix_raw[int(lst[meta_num])*5+1].split()), np.array(transform_matrix_raw[int(lst[meta_num])*5+2].split()), np.array(transform_matrix_raw[int(lst[meta_num])*5+3].split()), np.array([0,0,0])])
+            tt = transform_matrix_raw[int(lst[meta_num])*5+4].split()
             tt.append(1)
             t_matrix.append([np.array(tt)])
-
-            focal_length.append(np.array(transform_matrix_raw[meta_num*5].split())[0])
-        
+            #R_matrix.append([np.array(transform_matrix_raw[meta_num*5+1].split()), np.array(transform_matrix_raw[meta_num*5+2].split()), np.array(transform_matrix_raw[meta_num*5+3].split()), np.array(transform_matrix_raw[meta_num*5+4].split())])
+                      
+            focal_length.append(np.array(transform_matrix_raw[int(lst[meta_num])*5].split())[0])
+      
        
         transform_matrix = np.concatenate((np.array(R_matrix, dtype=np.float32), np.array(t_matrix, dtype=np.float32).transpose(0,2,1)), axis=2)
+        #matrix_fill = np.array([[0,0,0,1]])
+        #transform_matrix = np.concatenate((np.array(R_matrix, dtype=np.float32).transpose(0,2,1), matrix_fill.repeat([len(meta_raw)], axis=0)[:,None,:]), axis=1)
+       
         focal = np.array(focal_length, dtype=np.float32)
         img_h = np.array(img_h, dtype=np.int)+1
         img_w = np.array(img_w, dtype=np.int)+1
-        
     
         #w, h = int(self.meta['w']/self.downsample), int(self.meta['h']/self.downsample)
 
@@ -121,18 +135,18 @@ class IndoorDataset(Dataset):
         self.img_wh = []
         self.raw_poses = []
         self.intrinsics = []
- 
+        self.camera_dir = []
         #img_eval_interval = 1 if self.N_vis < 0 else len(self.meta['frames']) // self.N_vis
-        img_eval_interval = 1 if self.N_vis < 0 else len(meta_raw) // self.N_vis
-        idxs = list(range(0, len(meta_raw), img_eval_interval))
-        for i in tqdm(idxs, desc=f'Loading data {self.split} ({len(meta_raw)})'):#img_list:#
- 
-            pose = np.array(transform_matrix[i]) # @ self.blender2opencv
+        img_eval_interval = 1 if self.N_vis < 0 else len(lst) // self.N_vis
+       
+        idxs = list(range(0, len(lst), img_eval_interval))
+        for i in tqdm(idxs, desc=f'Loading data {self.split} ({len(lst)})'):#img_list:#
+            pose = np.linalg.inv(np.array(transform_matrix[i])) 
+            #pose = -np.array(transform_matrix[i][:3,:3]).T*np.array(transform_matrix[i][:3,3]).T # * self.opengl  #@ self.blender2opencv
             c2w = torch.FloatTensor(pose)
             self.poses += [c2w]
             self.raw_poses += [torch.FloatTensor(np.array(transform_matrix[i]))]
-
-            image_path = os.path.join(self.root_dir, f"images/{img_idx[i]}")
+            image_path = os.path.join(self.root_dir, f"{self.split}/{img_idx[i]}")
             self.image_paths += [image_path]
             img = Image.open(image_path)
             #if self.downsample!=1.0:
@@ -149,12 +163,12 @@ class IndoorDataset(Dataset):
             img = img.view(-1, img_w[i]*img_h[i]).permute(1, 0)
             self.all_rgbs += [img]
             
-
+ 
             cx = (img_w[i]-1)/2. 
             cy = (img_h[i]-1)/2.
             self.directions, _ = get_ray_directions(img_h[i], img_w[i], [focal[i], focal[i]])
+
             self.directions =self.directions / torch.norm(self.directions, dim=-1, keepdim=True)
-            
             intrinsics = torch.tensor([[focal[i], 0, cx],[0, focal[i], cy], [0, 0, 1]]).float()
             
             if i == 0: 
@@ -163,6 +177,7 @@ class IndoorDataset(Dataset):
                 self.proj_mat = torch.cat((self.proj_mat, intrinsics.unsqueeze(0) @ torch.inverse(c2w)[:3]), dim=2)
 
             rays_o, rays_d = get_rays(self.directions, c2w)  # both (h*w, 3)
+            self.camera_dir += [torch.cat([rays_o[(img_h[i]//2)*(img_w[i]//2),:], rays_o[(img_h[i]//2)*(img_w[i]//2),:]+40*rays_d[(img_h[i]//2)*(img_w[i]//2),:]], 0)]
             self.all_rays += [torch.cat([rays_o, rays_d], 1)]  # (h*w, 6)
             #self.all_rays_vis_edge += [torch.stack([rays_o+rays_d*0.01, rays_o+rays_d*20], 2)]
             #self.all_rays_vis_vert += [torch.cat([rays_o+rays_d*0.01, rays_o+rays_d*20], 0)]
@@ -173,6 +188,8 @@ class IndoorDataset(Dataset):
         self.proj_mat = torch.tensor(self.proj_mat)
         self.raw_poses = torch.stack(self.raw_poses)
         self.poses = torch.stack(self.poses)
+        self.camera_dir = torch.stack(self.camera_dir)
+
         #self.all_rays_vis_edge = torch.cat(self.all_rays_vis_edge, 0)
         #self.all_rays_vis_vert = torch.cat(self.all_rays_vis_vert, 0)
         
@@ -180,14 +197,16 @@ class IndoorDataset(Dataset):
         if not self.is_stack:  
             self.all_rays = torch.cat(self.all_rays, 0)  # (len(self.meta['frames])*h*w, 3)
             self.all_rgbs = torch.cat(self.all_rgbs, 0)  # (len(self.meta['frames])*h*w, 3)
-
-       #      self.all_depth = torch.cat(self.all_depth, 0)  # (len(self.meta['frames])*h*w, 3)
+            #self.all_depth = torch.cat(self.all_depth, 0)  # (len(self.meta['frames])*h*w, 3)
         #else:
         #    self.all_rays = torch.stack(self.all_rays, 0)  # (len(self.meta['frames]),h*w, 3)
         #    self.all_rgbs = torch.stack(self.all_rgbs, 0).reshape(-1,*self.img_wh[::-1], 3)  # (len(self.meta['frames]),h,w,3)
 
             # self.all_masks = torch.stack(self.all_masks, 0).reshape(-1,*self.img_wh[::-1])  # (len(self.meta['frames]),h,w,3)
-        #draw_ray(self.all_rays_vis_vert.numpy(), self.all_rays_vis_edge.numpy().transpose(0,2,1), 0.01, 20)
+        
+        #np.savetxt(f"/home/gqk/cloud_tensoRF/log/indoor_scnenes/camera_posit.txt", self.camera_dir[:,:3].numpy(), delimiter=";")
+
+        #draw_ray(self.camera_dir.reshape([self.camera_dir.shape[0]*2, 3]).numpy(), self.camera_dir.numpy(), 0.01, 30)
         #exit()
        
 
@@ -234,6 +253,7 @@ class IndoorMVSDataset(Dataset):
         self.scale_factor = 1.0 / 1.0
 
         self.blender2opencv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+        self.opengl = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
         #self.height, self.width = int(self.img_wh[1]), int(self.img_wh[0])
 
         self.white_bg = True
@@ -256,19 +276,21 @@ class IndoorMVSDataset(Dataset):
         t_matrix = [] 
         focal_length = []
 
+        # list of train data or test data
+        with open(os.path.join(self.root_dir, f"{self.split}_list.txt"), 'r') as f_lst:
+            lst = f_lst.readlines()
 
         for meta_num in range(len(meta_raw)):
-            img_idx.append(meta_raw[meta_num].split()[0])
-            img_w.append(np.array(meta_raw[meta_num].split()[1]))
-            img_h.append(np.array(meta_raw[meta_num].split()[2]))
-
-                        
-            R_matrix.append([np.array(self.transform_matrix_raw[meta_num*5+1].split()), np.array(self.transform_matrix_raw[meta_num*5+2].split()), np.array(transform_matrix_raw[meta_num*5+3].split()), np.array([0,0,0])])
-            tt = self.transform_matrix_raw[meta_num*5+4].split()
+            img_idx.append(meta_raw[int(lst[meta_num])].split()[0])
+            img_w.append(np.array(meta_raw[int(lst[meta_num])].split()[1]))
+            img_h.append(np.array(meta_raw[int(lst[meta_num])].split()[2]))
+          
+            R_matrix.append([np.array(self.transform_matrix_raw[int(lst[meta_num])*5+1].split()), np.array(self.transform_matrix_raw[int(lst[meta_num])*5+2].split()), np.array(self.transform_matrix_raw[int(lst[meta_num])*5+3].split()), np.array([0,0,0])])
+            tt = self.transform_matrix_raw[int(lst[meta_num])*5+4].split()
             tt.append(1)
             t_matrix.append([np.array(tt)])
 
-            focal_length.append(np.array(self.transform_matrix_raw[meta_num*5].split())[0])
+            focal_length.append(np.array(self.transform_matrix_raw[int(lst[meta_num])*5].split())[0])
         
        
         self.transform_matrix = np.concatenate((np.array(R_matrix, dtype=np.float32), np.array(t_matrix, dtype=np.float32).transpose(0,2,1)), axis=2)
@@ -340,7 +362,7 @@ class IndoorMVSDataset(Dataset):
         #focal = 0.5 * 800 / np.tan(0.5 * self.meta['camera_angle_x'])  # original focal length
         #focal *= self.img_wh[0] / 800  # modify focal length to match size self.img_wh
         #self.focal = focal
-        self.near_far = np.array([0.01, 15.0])
+        self.near_far = np.array([0.1, 45.0])
 
  
         for vid in list:

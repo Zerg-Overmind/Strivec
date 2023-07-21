@@ -87,15 +87,16 @@ class ScannetDataset(Dataset):
         self.white_bg = True
         self.args = args
         self.rnd_ray = rnd_ray
-        self.N_vis = N_vis
+        self.N_vis = N_vis 
         self.root_dir = datadir
         self.split = split
         self.is_stack = is_stack
         self.img_wh = (int(img_wh[0] * downsample), int(img_wh[1] * downsample))
+    
         self.margin = self.args.margin if self.split=="train" else self.args.test_margin # self.opt.edge_filter
 
         self.max_len = max_len
-        self.near_far = [0.5, 5.0] # [args.near_plane, args.far_plane]
+        self.near_far = [0.5, 6.0] # [args.near_plane, args.far_plane]
         self.blender2opencv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
         self.height, self.width = int(self.img_wh[1]), int(self.img_wh[0])
         self.define_transforms()
@@ -117,6 +118,17 @@ class ScannetDataset(Dataset):
         # point_xyz = mvs_utils.load_ply_points(args)
         point_xyz = mvs_utils.load_init_depth_points(args, self.all_id_list, self.depth_intrinsic, device="cuda")
         self.scene_bbox = torch.stack([torch.min(point_xyz, dim=0)[0], torch.max(point_xyz, dim=0)[0]], dim=0)
+
+
+        # for dvgo
+        self.unbounded_inward = False
+        self.unbounded_inner_r = 0.0
+        self.flip_y = False
+        self.flip_x = False
+        self.inverse_y = False
+        self.ndc = False
+        self.near_clip = None
+        self.irregular_shape = False
 
 
     def normalize_cam(self, w2cs, c2ws):
@@ -142,6 +154,11 @@ class ScannetDataset(Dataset):
         blur_score = np.asarray(blur_score)
         ids = blur_score.argsort()[:150]
         allind = np.asarray(list)
+        blur_path = os.path.join(self.root_dir, "exported/blur_list.txt")
+        with open(blur_path,"w") as f:
+           for kc in ids:
+              f.write(str(kc))
+              f.write('\n')
         print("most blurry images", allind[ids])
 
     def remove_blurry(self, list):
@@ -171,26 +188,30 @@ class ScannetDataset(Dataset):
         #     self.train_id_list = [self.all_id_list[i] for i in range(len(self.all_id_list)) if (((i % 100) > 19) and ((i % 100) < 81 or (i//100+1)*100>=len(self.all_id_list)))]
         # else:  # nsvf configuration
         step = 5
+        #self.detect_blurry(self.all_id_list)
+        #self.all_id_list = self.remove_blurry(self.all_id_list)
         if self.split == "train":
+            ## only remove blurry images within trainset
+            #self.id_list = self.all_id_list[::step]
+            #self.detect_blurry(self.id_list)
+            #self.id_list = self.remove_blurry(self.id_list)
             self.id_list = self.all_id_list[::step]
-            self.id_list = self.remove_blurry(self.id_list)
         else:
-            # self.id_list = [self.all_id_list[i] for i in range(len(self.all_id_list)) if (i % step) !=0] if self.args.test_num_step != 1 else self.all_id_list
-            self.id_list = self.all_id_list
+            self.id_list = [self.all_id_list[i] for i in range(len(self.all_id_list)) if (i % step) !=0] #if self.args.test_num_step != 1 else self.all_id_list
+            
 
         print("all_id_list",len(self.all_id_list))
         print("id_list",len(self.id_list), self.id_list)
 
-        self.intrinsic = np.loadtxt(os.path.join(self.root_dir, "exported/intrinsic/intrinsic_color.txt")).astype(
-            np.float32)[:3, :3]
+        self.intrinsics = np.loadtxt(os.path.join(self.root_dir, "exported/intrinsic/intrinsic_color.txt")).astype(np.float32)[:3, :3]
         self.depth_intrinsic = np.loadtxt(
             os.path.join(self.root_dir, "exported/intrinsic/intrinsic_depth.txt")).astype(np.float32)[:3, :3]
         img = Image.open(self.image_paths[0])
         ori_img_shape = list(self.transform(img).shape)  # (4, h, w)
-        self.intrinsic[0, :] *= (self.width / ori_img_shape[2])
-        self.intrinsic[1, :] *= (self.height / ori_img_shape[1])
+        self.intrinsics[0, :] *= (self.width / ori_img_shape[2])
+        self.intrinsics[1, :] *= (self.height / ori_img_shape[1])
 
-        self.directions, self.ij = get_ray_directions(h, w, [self.intrinsic[0,0], self.intrinsic[1,1]], center=[self.intrinsic[0,2], self.intrinsic[1,2]])  # (h, w, 3)
+        self.directions, self.ij = get_ray_directions(h, w, [self.intrinsics[0,0], self.intrinsics[1,1]], center=[self.intrinsics[0,2], self.intrinsics[1,2]])  # (h, w, 3)
         if self.margin != 0:
             self.directions, self.ij = self.directions[self.margin:-self.margin, self.margin:-self.margin, :], self.ij[self.margin:-self.margin, self.margin:-self.margin, :]
         self.directions = self.directions / torch.norm(self.directions, dim=-1, keepdim=True)
@@ -200,6 +221,7 @@ class ScannetDataset(Dataset):
             self.all_rgbs = []
             self.all_masks = []
             self.all_depth = []
+            self.raw_poses = []
 
             img_eval_interval = 1 if self.N_vis < 0 else len(self.meta['frames']) // self.N_vis
             idxs = list(range(0, len(self.id_list), img_eval_interval))
@@ -209,6 +231,7 @@ class ScannetDataset(Dataset):
                 vid = self.id_list[i]
                 c2w = np.loadtxt(os.path.join(self.root_dir, "exported/pose", "{}.txt".format(vid))).astype(np.float32)
                 c2w = torch.FloatTensor(c2w)
+                self.raw_poses += [c2w]
 
                 image_path = os.path.join(self.root_dir, "exported/color/{}.jpg".format(vid))
                 img = Image.open(image_path)
@@ -225,14 +248,48 @@ class ScannetDataset(Dataset):
             if not self.is_stack:
                 self.all_rays = torch.cat(self.all_rays, 0)  # (len(self.meta['frames])*h*w, 3)
                 self.all_rgbs = torch.cat(self.all_rgbs, 0)  # (len(self.meta['frames])*h*w, 3)
-                    # print("!!!!!!!!!!!!!!!!!!!!!!!!!self.all_alpha", self.all_alpha.shape)
-            #             self.all_depth = torch.cat(self.all_depth, 0)  # (len(self.meta['frames])*h*w, 3)
+    
             else:
                 self.all_rays = torch.stack(self.all_rays, 0)  # (len(self.meta['frames]),h*w, 3)
                 self.all_rgbs = torch.stack(self.all_rgbs, 0).reshape(-1, self.img_wh[-1] - 2 * self.margin, self.img_wh[-2] - 2 * self.margin, 3)
         else:
-            self.all_rays = torch.arange(len(self.id_list))
-            self.all_rgbs = self.all_rays
+            self.all_rays = []
+            self.all_rgbs = []
+            self.all_masks = []
+            self.all_depth = []
+            self.raw_poses = []
+
+            img_eval_interval = 1 if self.N_vis < 0 else len(self.meta['frames']) // self.N_vis
+            idxs = list(range(0, len(self.id_list)))
+            for i in tqdm(idxs, desc=f'Loading data {self.split} ({len(idxs)})'):  # img_list:#
+
+                # print("vid",vid)
+                vid = self.id_list[i]
+                c2w = np.loadtxt(os.path.join(self.root_dir, "exported/pose", "{}.txt".format(vid))).astype(np.float32)
+                c2w = torch.FloatTensor(c2w)
+                self.raw_poses += [c2w]
+
+                image_path = os.path.join(self.root_dir, "exported/color/{}.jpg".format(vid))
+                img = Image.open(image_path)
+                img = img.resize(self.img_wh, Image.Resampling.LANCZOS)
+                img = self.transform(img)
+                if self.margin != 0:
+                    img = img[:, self.margin:-self.margin, self.margin:-self.margin]
+                img = img.reshape(3, -1).permute(1, 0)  # (4, h, w)
+                self.all_rgbs += [img]
+
+                rays_o, rays_d = get_rays(self.directions, c2w)  # both (h*w, 3)
+                self.all_rays += [torch.cat([rays_o, rays_d], 1)]  # (h*w, 6)
+
+            if not self.is_stack:
+                self.all_rays = torch.cat(self.all_rays, 0)  # (len(self.meta['frames])*h*w, 3)
+                self.all_rgbs = torch.cat(self.all_rgbs, 0)  # (len(self.meta['frames])*h*w, 3)
+
+            else:
+                self.all_rays = torch.stack(self.all_rays, 0)  # (len(self.meta['frames]),h*w, 3)
+                self.all_rgbs = torch.stack(self.all_rgbs, 0).reshape(-1, self.img_wh[-1] - 2 * self.margin, self.img_wh[-2] - 2 * self.margin, 3)
+            #self.all_rays = torch.arange(len(self.id_list))
+            #self.all_rgbs = self.all_rays
 
 
     def get_by_id(self, id):

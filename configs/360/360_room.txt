@@ -1,0 +1,79 @@
+
+dataset_name = llff
+datadir = ./data/360/room
+expname =  360_room
+basedir = ./log
+n_iters = 100000
+batch_size = 3000 #4096
+
+upsamp_list = [2000,3000,4000,5500,6500] # [2000,3000,5000,7000] [2000,3000,4000,5500,7000]
+#update_AlphaMask_list = [20000,40000]
+update_AlphaMask_list = [200000,400000] # [2000,4000,15000,30000]
+#local_range = [0.15, 0.15, 0.15] # [0.05, 0.05, 0.05] # [0.1, 0.1, 0.1]
+#local_dims_init = [15, 15, 15] #   [3, 5, 9, 17, 33]
+#local_dims_final = [65, 65, 65] #   [40, 40, 40]
+#max_tensoRF = 4
+
+local_range =  [1.2, 1.2, 1.2, 0.6, 0.6, 0.6] # [1.2, 1.2, 1.2, 0.6, 0.6, 0.6, 0.3, 0.3, 0.3]
+local_dims_init = [101, 101, 101, 51, 51, 51] # [81, 81, 81] [101, 101, 101, 51, 51, 51, 25, 25, 25]
+local_dims_final = [323, 323, 323, 161, 161, 161] # [323, 323, 323, 161, 161, 161, 81, 81, 81] [401, 401, 401, 161, 161, 161, 81, 81, 81]
+local_dims_trend = [145, 189, 233, 277, 323, 71, 91, 111, 131, 161] # [145, 189, 233, 277, 323, 71, 91, 111, 131, 161, 37, 47, 59, 71, 81]  [161, 221, 281, 341, 401, 71, 91, 111, 131, 161]
+unit_lvl=0 # which lvl to use deciding units
+filterall=1
+max_tensoRF = [4,4]
+
+
+N_vis = 5
+vis_every = 200000
+
+render_test = 1
+##n_lamb_sigma = [96]
+##n_lamb_sh = [288]
+#n_lamb_sigma = [32]
+#n_lamb_sh = [96]
+#data_dim_color = 48
+featureC = 128
+
+n_lamb_sigma = [48,32] # [64, 48]
+radiance_add = 1
+den_lvl_norm = 0
+rad_lvl_norm = 1
+n_lamb_sh = [96, 96]
+data_dim_color = [27, 27]
+
+model_name = PointTensorCP_hier #PointTensorCP
+
+shadingMode = MLP_Fea
+fea2denseAct = softplus
+
+view_pe = 2 
+fea_pe = 2
+
+lr_init = 3e-2
+#lr_decay_iters = 40000
+#lr_decay_target_ratio = 0.5
+
+L1_weight_inital = 1e-4
+L1_weight_rest = 5e-5
+rm_weight_mask_thre = 1e-4
+ray_type=2
+skip_zero_grad=1
+gpu_ids="0"
+vox_res = 320
+pointfile= ./log/room_points.vox
+#fps_num=0
+#vox_range=[0.15, 0.15, 0.15]
+vox_range= [1.2, 1.2, 1.2, 0.6, 0.6, 0.6] # [1.2, 1.2, 1.2, 0.6, 0.6, 0.6] 
+vox_center=[0,0]
+
+
+
+## dvgo
+use_geo = -1
+
+ub360 = 1
+indoor = 1
+downsample_train=2 # 1297x840
+#pre_lrate_decay = 80
+#pre_num_voxels= 32768000 # 320**3
+pre_N_iters = 15000

@@ -1,0 +1,67 @@
+
+dataset_name = llff
+datadir = ./data/360/garden
+expname =  360_garden
+basedir = ./log
+n_iters = 120000
+batch_size = 4096 
+
+upsamp_list = [2000,3000,4000,5500,7000] # [2000,3000,5000,7000] [2000,3000,4000,5500,7000]
+
+local_range =  [1.2, 1.2, 1.2, 0.6, 0.6, 0.6] # two scales: 1.2 0.6
+local_dims_init = [101, 101, 101, 51, 51, 51] # initial dimension of each scale: 101, 51
+local_dims_final = [323, 323, 323, 161, 161, 161] # initial dimension of each scale: 323, 161
+local_dims_trend = [145, 189, 233, 277, 323, 71, 91, 111, 131, 161] # 
+unit_lvl=0 # which lvl to use deciding units
+filterall=1 # only the points coveraged by all scales are considered
+max_tensoRF = [4,4] # the number of local tensors to be considered coveraging the sampled point along a ray (TopK and K=4 as mentioned in the paper)
+
+
+N_vis = 5 # the number of rendered views when testing/inference 
+vis_every = 20000 # tesing/inference at every 'vis_every' iters
+
+render_test = 1
+
+featureC = 128
+
+n_lamb_sigma = [48,32] 
+radiance_add = 1
+den_lvl_norm = 0
+rad_lvl_norm = 0
+n_lamb_sh = [48,48]
+data_dim_color = [27,27]
+
+model_name = StrivecCP_hier
+
+shadingMode = MLP_Fea
+fea2denseAct = softplus
+
+view_pe = 2 
+fea_pe = 2
+
+lr_init = 3e-2
+#lr_decay_iters = 40000
+#lr_decay_target_ratio = 0.5
+
+L1_weight_inital = 1e-4
+L1_weight_rest = 5e-5
+rm_weight_mask_thre = 1e-4
+ray_type=2
+skip_zero_grad=1
+gpu_ids="0"
+vox_res = 320
+pointfile= ./log/garden_points.vox
+
+vox_range = [1.2, 1.2, 1.2, 0.6, 0.6, 0.6] # distribute local tensors of different scales at every 'vox_range'; 1.2 for first scale and 0.6 for the second
+vox_center = [0,0]
+
+
+## dvgo
+use_geo = -1 # -1 for using dvgo to get a initial geometry, 1 for using other pre-loaded file (pointfile)
+
+ub360 = 1
+indoor = 0
+downsample_train=4 # 1297x840
+#pre_lrate_decay = 80
+#pre_num_voxels= 32768000 # 320**3
+pre_N_iters = 15000
