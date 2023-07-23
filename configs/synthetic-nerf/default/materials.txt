@@ -1,0 +1,54 @@
+
+dataset_name = blender
+datadir = ./data/nerf_synthetic/materials
+expname =  materials
+basedir = ./log
+n_iters = 30000
+batch_size = 4096 
+
+
+upsamp_list = [2000,3000,4000,5500,7000] 
+update_AlphaMask_list = [2000,4000] 
+local_range = [0.3, 0.3, 0.3, 0.15, 0.15, 0.15, 0.075, 0.075, 0.075]
+local_dims_init = [29, 29, 29, 15, 15, 15, 7, 7, 7] 
+local_dims_final = [121, 121, 121, 61, 61, 61, 31, 31, 31]
+local_dims_trend = [43, 65, 85, 103, 121, 23, 35, 43, 53, 61, 11, 17, 21, 27, 31]
+unit_lvl=0 # which lvl to use deciding units
+filterall=1 
+max_tensoRF = [4, 4, 4]
+
+
+N_vis = 5
+vis_every = 200000
+
+render_test = 1
+featureC = 128
+
+n_lamb_sigma = [32,24,12]
+radiance_add = 1
+den_lvl_norm = 1
+rad_lvl_norm = 0
+n_lamb_sh = [96, 96, 96]
+data_dim_color =  [27,27,27]
+
+model_name = Strivec_hier
+
+shadingMode = MLP_Fea
+fea2denseAct = softplus
+
+view_pe = 2
+fea_pe = 2
+
+L1_weight_inital = 1e-5
+L1_weight_rest = 1e-5
+rm_weight_mask_thre = 1e-4
+ray_type=2
+skip_zero_grad=1
+gpu_ids="0"
+vox_res = 320
+pointfile= ./log/materials_points.txt
+vox_range=[0.4, 0.4, 0.4, 0.2, 0.2, 0.2, 0.1, 0.1, 0.1]
+vox_center=[1,1,1]
+
+## dvgo
+use_geo = -1
