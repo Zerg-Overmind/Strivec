@@ -1,0 +1,65 @@
+dataset_name = scannet
+datadir = ./data/scene0241_01
+expname =  scan_241 
+basedir = ./log
+n_iters = 300000
+batch_size = 2048 #4096
+   
+
+upsamp_list = [18000,36000, 54000, 72000, 96000, 120000] 
+update_AlphaMask_list = [36000, 72000] 
+local_range = [2.5, 2.5, 2.5, 1.6, 1.6, 1.6, 0.8, 0.8, 0.8, 0.4, 0.4, 0.4] 
+local_dims_init =  [157, 157, 157, 101, 101, 101, 51, 51, 51, 25, 25, 25] 
+local_dims_final = [525, 525, 525, 401, 401, 401, 201, 201, 201, 101, 101, 101]
+local_dims_trend = [201, 251, 301, 401, 525, 321, 441, 561, 681, 801, 161, 221, 281, 341, 401, 81, 111, 141, 171, 201, 41, 55, 71, 85, 101] 
+vox_range = [3.0, 3.0, 3.0, 1.7, 1.7, 1.7, 0.6, 0.6, 0.6, 0.3, 0.3, 0.3]
+vox_center=[1, 1, 1, 1] 
+n_lamb_sigma = [24, 24, 16, 12] 
+n_lamb_sh =  [48, 48, 48, 48] 
+unit_lvl=0 # which lvl to use deciding units
+filterall=1
+max_tensoRF = [4,4,2,2] 
+
+N_vis = 5
+vis_every = 1000000
+
+render_test = 1
+#render_train = 1
+
+
+radiance_add = 1
+den_lvl_norm = 1
+rad_lvl_norm = 0
+data_dim_color = [27,27,27,27]   
+
+featureC = 128
+model_name = StrivecCP_hier 
+
+shadingMode = MLP_Fea
+fea2denseAct = softplus
+
+
+# dbasis
+#vm_agg_mode=1
+#vm_sep_mat=1
+
+view_pe = 2
+fea_pe = 2
+
+L1_weight_inital = 1e-5
+L1_weight_rest = 1e-5
+rm_weight_mask_thre = 1e-4
+ray_type=2
+skip_zero_grad=1
+gpu_ids="0"
+vox_res = 320
+pointfile = "./data/scene0241_01/241_pts_from_mesh.txt"
+#fps_num=[0]
+test_margin = 10
+margin = 10
+
+## dvgo
+use_geo = 1
+ 
+
+
