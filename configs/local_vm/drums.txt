@@ -1,0 +1,56 @@
+
+dataset_name = blender
+datadir = ./data/nerf_synthetic/drums
+expname =  drums_vm
+basedir = ./log
+n_iters = 30000
+batch_size = 4096 
+pointfile= ./log/drums_points.txt
+
+upsamp_list = [2000,3000,4000,5500,7000]
+update_AlphaMask_list = [2000,4000]
+
+local_range = [0.15, 0.15, 0.15] #  scale1- [0.3, 0.3, 0.3]  scale2- [0.15, 0.15, 0.15]   scale3-[0.075, 0.075, 0.075]
+local_dims_init = [15, 15, 15] #  scale1- [29, 29, 29]  scale2- [15, 15, 15]   scale3-[7, 7, 7]
+local_dims_final = [61, 61, 61] #  scale1- [121, 121, 121]  scale2- [61, 61, 61]   scale3-[31, 31, 31]
+local_dims_trend =  [23, 35, 43, 53, 61] #  scale1- [43, 65, 85, 103, 121]  scale2- [23, 35, 43, 53, 61]   scale3-[11, 17, 21, 27, 31]
+unit_lvl=0 # which lvl to use deciding units
+filterall=1
+max_tensoRF = [4]
+
+N_vis = 5
+vis_every = 30000
+render_test = 1
+
+n_lamb_sigma = [12]
+radiance_add = 1
+den_lvl_norm = 0
+rad_lvl_norm = 0
+n_lamb_sh = [24]
+data_dim_color = [27]
+
+featureC = 128
+model_name = PointTensor_DBase
+
+shadingMode = MLP_Fea
+fea2denseAct = softplus
+
+vm_agg_mode=1
+vm_sep_mat=2
+
+view_pe = 2
+fea_pe = 2
+
+L1_weight_inital = 1e-5
+L1_weight_rest = 1e-5
+rm_weight_mask_thre = 1e-4
+ray_type=2
+skip_zero_grad=1
+gpu_ids="0"
+vox_res = 320
+# fps_num=[0]
+vox_range=[0.2, 0.2, 0.2] # 0.4, 0.4, 0.4, 0.2, 0.2, 0.2, 0.1, 0.1, 0.1, 0.05, 0.05, 0.05
+vox_center=[1] # 1,1,1,1
+
+## dvgo
+use_geo = -1
