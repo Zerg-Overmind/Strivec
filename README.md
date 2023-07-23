@@ -63,7 +63,7 @@ Strivec
     │   │   │──...
 ```
 
-## run training & evaluation
+## Training & Evaluation
 We not only provide the training and evaluation code to reproduce the results in the paper, but also the code of ablation that uses local VM tensors instead of local CP tensors (results
 are [here](https://drive.google.com/drive/folders/1-OW0Qdnk4Wz-9BRr81P2mDe1aYDmjd0g?usp=sharing)).
 
