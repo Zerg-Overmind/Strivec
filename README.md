@@ -4,11 +4,15 @@
 [Project Sites](https://github.com/Zerg-Overmind/Strivec/)
  | [Paper](https://github.com/Zerg-Overmind/Strivec/)
 
+![Teaser image](image/main_fig.png)
+
 ## Overal Instruction
 1. We build the initial geometry with the 1st stage of DVGO in our implementation by default, which is `use_geo = -1` in config files.
 2. The geometry can be either initialized online (by default) or from other sources in `.txt` form, which can be enabled with `use_geo = 1` and `pointfile = /your/file.txt` in config files.  
 
-For Synthetic-NeRF dataset, we provide the initial geometry from [DVGO](https://drive.google.com/file/d/1Z7grMvGNVUFa4RO1KuRAUkkL8JiHMMyw/view?usp=sharing) (which is the default one in our implementation) and from [MVS](https://drive.google.com/file/d/1m6ftmKU4lhxXQZKhkoeeWnC9F85kyMBu/view?usp=sharing). Feel free to try both (e.g., `use_geo = 1` and `pointfile = /your/mvs_file.txt`) to see the comparison. 
+For Synthetic-NeRF dataset, we provide the initial geometry from DVGO (which is the default one in our implementation) and from [MVS](https://drive.google.com/file/d/1m6ftmKU4lhxXQZKhkoeeWnC9F85kyMBu/view?usp=sharing). Feel free to try both (e.g., `use_geo = 1` and `pointfile = /your/mvs_file.txt`) to see the comparison. 
+
+For Scannet dataset, we use the initial geometry provided by the dataset itself. We convert the original `.ply` file into `.txt` and you may download from [here](https://drive.google.com/file/d/1QLeHGUwAqEkrZEQPQSDvSSyzViO1ziGY/view?usp=sharing).
 
 ## Installation
 
@@ -32,9 +36,14 @@ And the layout should look like this:
 Strivec
 ├── data
 │   ├── nerf_synthetic
-    │   │   │──chair
-    │   │   │──drums
-    │   │   │──...
+    │   │   |──default
+    │   │   │   |──chair
+    │   │   │   │──drums
+    │   │   │   |──...
+    │   │   |──local_vm
+    │   │   │   |──chair
+    │   │   │   │──drums
+    │   │   │   |──...
     ├── scene0101_04 (scannet)
     │   │   │──exported
     │   │   │──scene0101_04_2d-instance-filt.zip
@@ -66,6 +75,7 @@ python train_hier.py --config ./configs/synthetic-nerf/default/chair.txt
 train_dbasis.py --config ./configs/synthetic-nerf/local_vm/chair.txt
 
 ```
+![visual image](image/visualization.png)
 
 ## Citation
 If you find our code or paper helps, please consider citing:
