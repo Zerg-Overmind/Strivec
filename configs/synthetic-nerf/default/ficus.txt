@@ -32,7 +32,8 @@ data_dim_color = [27, 27,27]
 
 
 
-model_name = Strivec_hier
+model_name = StrivecCP_hier
+
 
 shadingMode = MLP_Fea
 fea2denseAct = softplus

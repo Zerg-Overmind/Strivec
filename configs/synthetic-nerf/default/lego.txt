@@ -29,7 +29,8 @@ rad_lvl_norm = 0
 n_lamb_sh = [48,48,48]
 data_dim_color =  [27,27,27]
 
-model_name = Strivec_hier
+model_name = StrivecCP_hier
+
 
 shadingMode = MLP_Fea
 fea2denseAct = softplus
