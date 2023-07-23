@@ -22,9 +22,9 @@ All the codes are tested in the following environment:
 ## Data Preparation
 
 * [Synthetic-NeRF](https://drive.google.com/drive/folders/128yBriW1IG_3NJ5Rp7APSTZsJqdJdfc1) 
-* [Scannet] (https://drive.google.com/drive/folders/1GoxJyf_YYEGvWStD7SpcPBqhePqCGpEJ)
+* [Scannet](https://drive.google.com/drive/folders/1GoxJyf_YYEGvWStD7SpcPBqhePqCGpEJ)
 * [Tanks&Temples](https://dl.fbaipublicfiles.com/nsvf/dataset/TanksAndTemple.zip)
-* [Mip-NeRF360] (http://storage.googleapis.com/gresearch/refraw360/360_v2.zip)
+* [Mip-NeRF360](http://storage.googleapis.com/gresearch/refraw360/360_v2.zip)
 
 And the layout should look like this:
 
