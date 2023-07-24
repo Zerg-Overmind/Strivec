@@ -11,6 +11,8 @@ np.random.seed(0)
 from tqdm import tqdm
 from utils import masking, create_mvs_model
 from dataLoader import mvs_dataset_dict
+#from preprocessing.boxing import find_tensorf_box, filter_cluster_n_pnts
+#from preprocessing.cluster import cluster
 
 def load(pointfile):
     if os.path.exists(pointfile):
@@ -18,7 +20,7 @@ def load(pointfile):
     else:
         return None
 
-def gen_geo(args):
+def gen_geo(args, geo):
     if args.pointfile.endswith('ply'):
         # points_path = os.path.join(self.root_dir, "exported/pcd.ply")
         geo = mvs_utils.load_ply_points(args)
@@ -33,7 +35,8 @@ def gen_geo(args):
         geo = mvs_utils.load_init_depth_points(args, all_id_list, depth_intrinsic, device="cuda")
         # np.savetxt(os.path.join(args.basedir, args.expname, "depth.txt"), geo.cpu().numpy(), delimiter=";")
     else:
-        geo = load(args.pointfile)
+        if geo is None: # no points by dvgo 
+          geo = load(args.pointfile)
     if geo is None:
         print("Do MVS to create pointfile at ", args.pointfile)
         dataset = mvs_dataset_dict[args.dataset_name]
@@ -47,10 +50,10 @@ def gen_geo(args):
         print("successfully loaded args.pointfile at : ", args.pointfile, geo.shape)
     geo_lst = []
     if args.vox_range is not None and not args.pointfile[:-4].endswith("vox"):
-        geo_xyz, confidence = geo[..., :3], geo[..., -1:]
+        geo_xyz, confidence = geo[..., :3], geo[..., -1:] 
         for i in range(len(args.vox_range)):
             geo_lvl, _, _, _ = mvs_utils.construct_voxrange_points_mean(geo_xyz, torch.as_tensor(args.vox_range[i], dtype=torch.float32, device=geo.device), vox_center=args.vox_center[i]>0)
-            # print("after vox geo shape", geo_lvl.shape)
+            print("after vox geo shape", geo_lvl.shape)
             np.savetxt(args.pointfile[:-4] + "_{}_vox".format(args.vox_range[i][0]) + ".txt", geo_lvl.cpu().numpy(), delimiter=";")
             geo_lst.append(geo_lvl.cuda())
 
@@ -62,8 +65,101 @@ def gen_geo(args):
                 print("fps_inds", fps_inds.shape, geo_lvl.shape)
                 np.savetxt(args.pointfile[:-4]+"_{}".format(args.fps_num)+".txt", geo_lvl.cpu().numpy(), delimiter=";")
                 geo_lst[i] = geo_lvl.cuda()
-    return geo_lst
+    return None, geo_lst
 
+
+def gen_geo_o(args):
+    pnts = load(args.pointfile)
+    if pnts is None:
+        print("Do MVS to create pointfile at ", args.pointfile)
+        dataset = mvs_dataset_dict[args.dataset_name]
+        mvs_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False)
+        model = create_mvs_model(args)
+        xyz_world_all, confidence_filtered_all, rgb_all = gen_points_filter(mvs_dataset, args, model)
+        # geo = torch.cat([xyz_world_all, confidence_filtered_all], dim=-1)
+        pnts = torch.cat([xyz_world_all, torch.as_tensor(rgb_all * 255, device=xyz_world_all.device)], dim=-1)
+        os.makedirs(os.path.dirname(args.pointfile), exist_ok=True)
+        np.savetxt(args.pointfile, pnts.cpu().numpy(), delimiter=";")
+    else:
+        print("successfully loaded args.pointfile at : ", args.pointfile, pnts.shape)
+        if args.ranges[0] > -90.0:
+            spacemin = torch.as_tensor(args.ranges[:3], device=pnts.device)
+            spacemax = torch.as_tensor(args.ranges[3:], device=pnts.device)
+            mask = (pnts[...,:3] - spacemin[None, ...].to(pnts.device)) >= 0
+            mask *= (spacemax[None, ...].to(pnts.device) - pnts[...,:3]) >= 0
+            mask = torch.prod(mask, dim=-1) > 0
+            pnts = pnts[mask]
+    lvl = len(args.vox_range) if args.vox_range is not None else len(args.cluster_method)
+    cluster_dict = {
+        "cluster_xyz": [[] for l in range(lvl)],
+        "cluster_pnts": [[] for l in range(lvl)],
+        "box_length": [[] for l in range(lvl)],
+        "pca_axis": [[] for l in range(lvl)],
+        "stds": [[] for l in range(lvl)],
+    }
+
+    for l in range(lvl):
+        if args.vox_res > 0:
+            _, _, sampled_pnt_idx = mvs_utils.construct_vox_points_closest(
+                pnts[..., :3] if len(pnts) < 99999999 else pnts[::(len(pnts) // 99999999 + 1), ...].cuda(), args.vox_res)
+            pnts = pnts[sampled_pnt_idx, :]
+
+        cluster_dim = pnts.shape[-1] if pnts.shape[-1] == 6 else 3
+        lvl_pnts = pnts[..., :cluster_dim]
+        if cluster_dim == 6:
+            lvl_pnts[..., 3:] = lvl_pnts[..., 3:] / torch.max(lvl_pnts[..., 3:] + 1, dim=-1, keepdims=True)[0] / 100
+
+        count=0
+        count_max = 5
+        if args.vox_range is not None: # 1
+            #geo = load("/home/gqk/cloud_tensoRF/log/ship_points.txt") # mvs points
+            cluster_xyz, lvl_pnts, sparse_grid_idx, cluster_inds = mvs_utils.construct_voxrange_points_mean(lvl_pnts, torch.as_tensor(args.vox_range[l], dtype=torch.float32, device=pnts.device), vox_center=args.vox_center[l]>0)
+            cluster_xyz, lvl_pnts, sparse_grid_idx, cluster_inds = cluster_xyz.cpu().numpy(), lvl_pnts.cpu().numpy(), sparse_grid_idx.cpu().numpy(), cluster_inds.cpu().numpy()
+            # np.savetxt(args.pointfile[:-4] + "_{}_{}_vox".format(args.datadir.split("/")[-1], args.vox_range[l][0]) + ".txt", geo_lvl.cpu().numpy(), delimiter=";")
+            cluster_pnts, pca_cluster_newpnts, cluster_xyz, box_length, pca_axis, stds = find_tensorf_box(cluster_xyz, lvl_pnts, cluster_inds, None, "pca")
+            cluster_xyz, cluster_pnts, box_length, pca_axis, stds, lvl_pnts = filter_cluster_n_pnts(cluster_xyz, cluster_pnts, pca_cluster_newpnts, box_length, pca_axis, stds, None, args.dilation_ratio[l], args, filter_thresh= 15000, count=count)
+            cluster_dict["cluster_xyz"][l].append(cluster_xyz[...,:3])
+            cluster_dict["box_length"][l].append(box_length)
+            cluster_dict["pca_axis"][l].append(pca_axis)
+            cluster_dict["stds"][l].append(stds)
+            cluster_dict["cluster_pnts"][l] += cluster_pnts
+            count += 1
+            ###
+            # grid_idx_lst.append(sparse_grid_idx.cuda())
+            # inv_idx_lst.append(inv_idx.cuda())
+        lvl_pnts = lvl_pnts.cpu().numpy() if torch.is_tensor(lvl_pnts) else lvl_pnts
+        if args.cluster_method is not None:
+            for l2 in range(len(args.cluster_method)):
+                while lvl_pnts is not None and count <= count_max and len(lvl_pnts) > 1:
+                    cluster_xyz, cluster_inds, cluster_model = cluster(lvl_pnts, method=args.cluster_method[l2], num=np.minimum(args.cluster_num[l2]//min(count,1), len(lvl_pnts) // 2), vis=False, tol=0.000001 if count > 1 else 0.000001)
+                    cluster_pnts, pca_cluster_newpnts, cluster_xyz, box_length, pca_axis, stds = find_tensorf_box(cluster_xyz, lvl_pnts, cluster_inds, cluster_model, args.boxing_method[l2])
+                    #cluster_xyz, cluster_pnts, box_length, pca_axis, stds, lvl_pnts = filter_cluster_n_pnts(cluster_xyz, cluster_pnts, pca_cluster_newpnts, box_length, pca_axis, stds, cluster_model, args.dilation_ratio[l2], args, filter_thresh= 10000 if count < count_max else 5000, count=count)
+                    count+=1
+                    if len(cluster_xyz) == 0:
+                        continue
+                    cluster_dict["cluster_xyz"][l].append(cluster_xyz)
+                    cluster_dict["box_length"][l].append(box_length)
+                    cluster_dict["pca_axis"][l].append(pca_axis)
+                    cluster_dict["stds"][l].append(stds)
+                    cluster_dict["cluster_pnts"][l] += cluster_pnts
+              
+            
+                cluster_dict["cluster_xyz"][l] = np.concatenate(cluster_dict["cluster_xyz"][l])
+                cluster_dict["box_length"][l] = np.concatenate(cluster_dict["box_length"][l])
+                cluster_dict["pca_axis"][l] = np.concatenate(cluster_dict["pca_axis"][l])
+                cluster_dict["stds"][l] = np.concatenate(cluster_dict["stds"][l])
+
+           
+    # if args.fps_num is not None: # fps_num=[0]
+    #     for i in range(len(args.fps_num)):
+    #         if len(geo_lst[i]) > args.fps_num[i]:
+    #             fps_inds = torch_cluster.fps(geo_lst[i][...,:3], ratio=args.fps_num[i]/len(geo_lst[i]), random_start=True)
+    #             geo_lvl = geo_lst[i][fps_inds, ...]
+    #             print("fps_inds", fps_inds.shape, geo_lvl.shape)
+    #             np.savetxt(args.pointfile[:-4]+"_{}".format(args.fps_num)+".txt", geo_lvl.cpu().numpy(), delimiter=";")
+    #             geo_lst[i] = geo_lvl.cuda()
+                
+    return cluster_dict, pnts[...,:3]
 
 
 def gen_points_filter(dataset, args, model):
