@@ -1,7 +1,7 @@
 # Strivec: Sparse Tri-Vector Radiance Fields
 <img src="image/USC-Logos.png" width=120px /><img src="./image/Adobe-Logos.png" width=120px /><img src="./image/ucsd_logo.png" width=60px />
 
-[Project Sites](https://github.com/Zerg-Overmind/Strivec/)
+[Project Sites](https://github.com/Zerg-Overmind/Strivec/) (coming soom)
  | [Paper](https://github.com/Zerg-Overmind/Strivec/)
 
 ![Teaser image](image/main_fig.png)
