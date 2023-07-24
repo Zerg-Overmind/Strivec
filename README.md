@@ -76,6 +76,11 @@ python train_hier.py --config ./configs/synthetic-nerf/default/chair.txt
 train_dbasis.py --config ./configs/synthetic-nerf/local_vm/chair.txt
 
 ```
+
+## Visualization
+We visualize the local tensors of different scales into `./log/your_scene/rot_tensoRF/0_lvl_k.ply`, where k is the kth scale.
+
+
 ![visual image](image/visualization.png)
 
 ## Citation

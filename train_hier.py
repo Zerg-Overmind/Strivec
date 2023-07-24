@@ -56,9 +56,6 @@ def export_mesh(args, geo):
 
 @torch.no_grad()
 def render_test(args, cluster_dict, geo, test_dataset, train_dataset):
-    # init dataset
-    #dataset = dataset_dict[args.dataset_name]
-    #test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True)
     white_bg = test_dataset.white_bg
     ray_type = args.ray_type
 
@@ -95,10 +92,6 @@ def render_test(args, cluster_dict, geo, test_dataset, train_dataset):
 
 def reconstruction(args, cluster_dict, geo, test_dataset, train_dataset):
 
-    # init dataset
-    #dataset = dataset_dict[args.dataset_name]
-    #train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False, rnd_ray=args.rnd_ray, args=args)
-    #test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True, args=args)
     if geo is None:
         geo = [train_dataset.center[None, :]]
 
@@ -119,9 +112,6 @@ def reconstruction(args, cluster_dict, geo, test_dataset, train_dataset):
     os.makedirs(f'{logfolder}/imgs_vis', exist_ok=True)
     os.makedirs(f'{logfolder}/imgs_rgba', exist_ok=True)
     os.makedirs(f'{logfolder}/rgba', exist_ok=True)
-
-    # init parameters
-    # tensorVM, renderer = init_parameters(args, train_dataset.scene_bbox.to(device), reso_list[0])
    
     aabb = train_dataset.scene_bbox.to(device)
     if args.ckpt is not None:
@@ -244,11 +234,6 @@ def reconstruction(args, cluster_dict, geo, test_dataset, train_dataset):
         rgb_map, weights, depth_map, rgbpers, ray_ids = renderer(rays_train, tensorf, chunk=args.batch_size, N_samples=-1, white_bg = white_bg, ray_type=ray_type, device=device, is_train=True, tensoRF_per_ray=tensoRF_per_ray_train, rot_step=cur_rot_step)
 
         loss = torch.mean((rgb_map - rgb_train) ** 2)
-      
-        ##### density visualization
-        #if iteration == 7000:
-        #    np.savetxt('./lego_cp.txt', np.array(xyz_sampled.cpu()), delimiter=";")
-            
         
 
         # loss
@@ -280,18 +265,12 @@ def reconstruction(args, cluster_dict, geo, test_dataset, train_dataset):
         if cur_rot_step:
             geo_optimizer.zero_grad()
         total_loss.backward()
-        # print("tensorf.basis_mat[0]", cur_rot_step, tensorf.density_line[0].grad)
-        # if not rot_step:
         optimizer.step()
         if cur_rot_step:
             geo_optimizer.step()
 
-
         loss = loss.detach().item()
-        
         PSNRs.append(-10.0 * np.log(loss) / np.log(10.0))
-        # summary_writer.add_scalar('train/PSNR', PSNRs[-1], global_step=iteration)
-        # summary_writer.add_scalar('train/mse', loss, global_step=iteration)
 
 
         for param_group in optimizer.param_groups:
@@ -327,21 +306,6 @@ def reconstruction(args, cluster_dict, geo, test_dataset, train_dataset):
             tensorf.shrink(new_aabb)
             L1_reg_weight = args.L1_weight_rest
             print("continuing L1_reg_weight", L1_reg_weight)
-
-
-        #if args.ray_type != 1 and iteration in filter_ray_list:
-        #    # filter rays outside the bbox
-        #    mask_filtered, tensoRF_per_ray = tensorf.filtering_rays(allrays, allrgbs)
-        #    tensoRF_per_ray = None if tensoRF_per_ray is None else tensoRF_per_ray.to(device)
-        #    allrays, allrgbs = allrays[mask_filtered], allrgbs[mask_filtered]
-        #    if args.rnd_ray > 0:
-        #        allalpha = allalpha[mask_filtered]
-        #        allijs = allijs[mask_filtered]
-        #        allc2ws = allc2ws[mask_filtered]
-
-        #    trainingSampler = SimpleSampler(allrgbs.shape[0], args.batch_size)
-    
-
 
 
         if args.upsamp_list is not None and iteration in args.upsamp_list:
@@ -437,56 +401,11 @@ if __name__ == '__main__':
      
     test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True, args=args)
     train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False, rnd_ray=False, args=args)
-
-    # dvgo to get points
-    if args.ub360 == 1:
-        #pnts = torch.tensor(np.loadtxt('./log/garden_DVGO.txt', delimiter=";"), dtype=torch.float32).cuda()
-        #pnts = torch.tensor(np.load('./log/360_garden/garden_vox.npy')).cuda()
-        #pnts = torch.tensor(np.loadtxt('./garden_coarse_dgvo.txt', delimiter=";"), dtype=torch.float32).cuda()
-        #pnts = torch.tensor(np.loadtxt('./stump_coarse_dgvo_o.txt', delimiter=";"), dtype=torch.float32).cuda()
-        #pnts = torch.tensor(np.loadtxt('/home/gqk/cloud_tensoRF/room_coarse_dvgo.txt', delimiter=";"), dtype=torch.float32).cuda()
-        #pnts = torch.tensor(np.loadtxt('./bicycle_coarse_dgvo.txt', delimiter=";"), dtype=torch.float32).cuda()
-        #pnts = torch.tensor(np.loadtxt('/home/gqk/cloud_tensoRF/bonsai_dgvo.txt', delimiter=";"), dtype=torch.float32).cuda()
-        a=1 
-    elif args.datadir.split('/')[3] == 'Barn':
-        pnts = torch.tensor(np.load('./log/Barn_vox.npy')).cuda()
-    elif args.datadir.split('/')[3] == 'Caterpillar':
-        pnts = torch.tensor(np.load('./log/Caterpillar_vox.npy')).cuda()
-    else:
-        pnts = get_density_pnts(args, train_dataset) if args.use_geo < 0 else None
         
-  
+
     pnts = get_density_pnts(args, train_dataset) if args.use_geo < 0 else None
-    
-    #np.savetxt('./room_coarse_dvgo.txt', np.array(pnts.cpu()), delimiter=";")
-    #exit()
-    #import pdb;pdb.set_trace()
-
-    #np.savetxt('./ficus_dgvo.txt', np.array(pnts.cpu()), delimiter=";")
-    #np.savetxt('./hotdog_dgvo.txt', np.array(pnts.cpu()), delimiter=";")
-    #np.savetxt('./lego_dgvo.txt', np.array(pnts.cpu()), delimiter=";")
-    #np.savetxt('./materials_dgvo.txt', np.array(pnts.cpu()), delimiter=";")
-    #np.savetxt('./mic_dgvo.txt', np.array(pnts.cpu()), delimiter=";")
-    #np.savetxt('./ship_dgvo.txt', np.array(pnts.cpu()), delimiter=";")
-
-    #garden = np.load('./log/360_garden/garden_vox.npy')
-    #np.savetxt('./360garden_dgvo.txt', np.array(garden), delimiter=";")
-    
-
-    #np.save('./log/360_garden/garden_vox.npy', np.array(pnts.cpu()))
-    
-    #if args.datadir[-6:] == 'garden':
-    #pnts = torch.tensor(np.loadtxt('./lego_cp.txt', delimiter=";"), dtype=torch.float32).cuda()
-    #else:
-    #   pnts = get_density_pnts(args, train_dataset) if args.use_geo < 0 else None
-
-    #pnts = torch.tensor(np.load('/home/gqk/cloud_tensoRF/log/Barn_vox.npy')).to(device)
-    #pnts = torch.tensor(np.load('/home/gqk/cloud_tensoRF/log/Caterpillar_vox.npy')).cuda()
 
     cluster_dict, geo = gen_geo(args, pnts) #if args.use_geo > 0 else None
-    
-    del pnts
-    torch.cuda.empty_cache()
     
     if args.export_mesh:
         export_mesh(args, geo)
