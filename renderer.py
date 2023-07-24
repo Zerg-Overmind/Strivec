@@ -7,7 +7,7 @@ from dataLoader.ray_utils import get_rays
 #from models.pointTensoRF_dbasis_inds import PointTensor_DBaseVMGS, PointTensor_DBase 
 #from models.archive_pointTensoRF import PointTensorCPB, PointTensorCPD, PointTensorVMSplit
 from models.Strivec_hier import StrivecCP_hier
-from models.Strivec_adapt import StrivecCP_adapt
+#from models.Strivec_adapt import StrivecCP_adapt
 from models.Strivec_dbasis_inds import Strivec_DBaseVMGS, Strivec_DBase
 from utils import *
 from dataLoader.ray_utils import ndc_rays_blender

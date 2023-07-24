@@ -12,13 +12,13 @@ from renderer import *
 from utils import *
 # from torch.utils.tensorboard import SummaryWriter
 import datetime
-
+from models.init_net.run import get_density_pnts
 from dataLoader import dataset_dict
 import sys
 
 from models.masked_adam import MaskedAdam
 
-
+ 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 renderer = OctreeRender_trilinear_fast
@@ -55,10 +55,10 @@ def export_mesh(args, geo):
 
 
 @torch.no_grad()
-def render_test(args, geo):
+def render_test(args, geo, test_dataset, train_dataset):
     # init dataset
-    dataset = dataset_dict[args.dataset_name]
-    test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True)
+    #dataset = dataset_dict[args.dataset_name]
+    #test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True)
     white_bg = test_dataset.white_bg
     ray_type = args.ray_type
 
@@ -93,12 +93,12 @@ def render_test(args, geo):
         evaluation_path(test_dataset,tensorf, c2ws, renderer, f'{logfolder}/{args.expname}/imgs_path_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ray_type=ray_type,device=device)
 
-def reconstruction(args, geo):
+def reconstruction(args, geo, test_dataset, train_dataset):
 
     # init dataset
-    dataset = dataset_dict[args.dataset_name]
-    train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False, rnd_ray=args.rnd_ray, args=args)
-    test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True, args=args)
+    #dataset = dataset_dict[args.dataset_name]
+    #train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False, rnd_ray=args.rnd_ray, args=args)
+    #test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True, args=args)
     if geo is None:
         geo = [train_dataset.center[None, :]]
 
@@ -296,10 +296,13 @@ def reconstruction(args, geo):
 
 
         if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
+          if args.render_test:
             # test_dataset
             PSNRs_test = evaluation(test_dataset, tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis, prtx=f'{iteration:06d}_', N_samples=-1, white_bg = white_bg, ray_type=ray_type, compute_extra_metrics=False)
             # summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
-
+          if args.render_train:
+            train_dataset_1 = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=True, rnd_ray=args.rnd_ray, args=args)
+            PSNRs_test = evaluation(train_dataset_1, tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis, prtx=f'{iteration:06d}_', N_samples=-1, white_bg = white_bg, ray_type=ray_type, compute_extra_metrics=False)
 
         if update_AlphaMask_list is not None and iteration in update_AlphaMask_list:
             new_aabb = tensorf.updateAlphaMask()
@@ -403,14 +406,19 @@ if __name__ == '__main__':
     torch.manual_seed(20211202)
     np.random.seed(20211202)
     args = comp_revise(args)
+    dataset = dataset_dict[args.dataset_name]
+     
+    test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True, args=args)
+    train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False, rnd_ray=False, args=args)
 
-    geo = gen_geo(args) if args.use_geo > 0 else None
+    pnts = get_density_pnts(args, train_dataset) if args.use_geo < 0 else None
+    _, geo = gen_geo(args, pnts) #if args.use_geo > 0 else None
 
     if args.export_mesh:
         export_mesh(args, geo)
 
     if args.render_only and (args.render_test or args.render_path):
-        render_test(args, geo)
+        render_test(args, geo, test_dataset, train_dataset)
     else:
-        reconstruction(args, geo)
+        reconstruction(args, geo, test_dataset, train_dataset)
 
