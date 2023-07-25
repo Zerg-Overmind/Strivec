@@ -6,22 +6,23 @@ basedir = ./log
 n_iters = 30000
 batch_size = 4096
 
-upsamp_list = [2000,3000,4000,5500,7000] # [2000,3000,5000,7000] [2000,3000,4000,5500,7000]
-update_AlphaMask_list = [2000,4000]
-local_range = [0.3, 0.3, 0.3, 0.15, 0.15, 0.15, 0.075, 0.075, 0.075]
-local_dims_init = [29, 29, 29, 15, 15, 15, 7, 7, 7] 
-local_dims_final = [121, 121, 121, 61, 61, 61, 31, 31, 31] 
-local_dims_trend = [43, 65, 85, 103, 121, 23, 35, 43, 53, 61, 11, 17, 21, 27, 31]
+upsamp_list = [2000,3000,4000,5500,7000] 
+update_AlphaMask_list = [2000,4000] 
+local_range = [0.3, 0.3, 0.3, 0.15, 0.15, 0.15, 0.075, 0.075, 0.075] # three scales: 0.3, 0.15, 0.75
+local_dims_init = [29, 29, 29, 15, 15, 15, 7, 7, 7] # initial dimension of each scale: 29, 15, 7
+local_dims_final = [121, 121, 121, 61, 61, 61, 31, 31, 31] # initial dimension of each scale: 121, 61, 31
+local_dims_trend = [43, 65, 85, 103, 121, 23, 35, 43, 53, 61, 11, 17, 21, 27, 31] # upsampling the dimension of each scale: 1st scale begins with 29, and 43, 65, 85, 103 and ends with 121; 2nd scale begins with 15, and 23, 35, 43, 53, and ends with 61; 
 unit_lvl=0 # which lvl to use deciding units
-filterall=1 
-max_tensoRF = [4, 4, 4]
+filterall=1 # only the points coveraged by all scales are considered
+max_tensoRF = [4, 4, 4] # the number of local tensors to be considered coveraging the sampled point along a ray (TopK and K=4 as mentioned in the paper)
 
-N_vis = 5
-vis_every = 200000
+N_vis = 5 # the number of rendered views when testing/inference 
+vis_every = 200000 # tesing/inference at every 'vis_every' iters
 
 render_test = 1
 featureC = 128
 
+# number of components of each scale
 n_lamb_sigma = [32, 24, 16]
 radiance_add = 1
 den_lvl_norm = 0
@@ -44,13 +45,13 @@ ray_type=2
 skip_zero_grad=1
 gpu_ids="0"
 vox_res = 320
-pointfile= ./log/chair_points.txt
+pointfile= ./log/chair_points.txt # your own inital geometry
 
-vox_range=[0.4, 0.4, 0.4, 0.2, 0.2, 0.2, 0.1, 0.1, 0.1]
+vox_range=[0.4, 0.4, 0.4, 0.2, 0.2, 0.2, 0.1, 0.1, 0.1] # distribute local tensors of different scales at every 'vox_range'; 0.4 for first scale, 0.2 for the second, and 0.1 for the third
 vox_center=[1,1,1]
 
 ## dvgo
-use_geo = -1
+use_geo = -1 # 1 when you want to use your own initial geometry claimed in 'pointfile'
 
 
 
