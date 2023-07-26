@@ -27,7 +27,7 @@ n_lamb_sigma = [32, 24, 16]
 radiance_add = 1
 den_lvl_norm = 0
 rad_lvl_norm = 0
-n_lamb_sh = [48, 48, 48]
+n_lamb_sh = [48, 48, 48] # now it is ours-48, if you want to try like ours-24, please do as [24, 24, 24]
 data_dim_color = [27, 27, 27]
 
 model_name = StrivecCP_hier
