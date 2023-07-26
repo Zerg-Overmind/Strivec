@@ -10,7 +10,7 @@
 1. We build the initial geometry with the 1st stage of DVGO in our implementation by default, which is `use_geo = -1` in config files.
 2. The geometry can be either initialized online (by default) or from other sources in `.txt` form, which can be enabled with `use_geo = 1` and `pointfile = /your/file.txt` in config files.  
 3. You may ignore `preprosessing` folder, which is initially for our ealy trying and not used here.
-4. YOu may refer to the comments in `./configs/synthetic-nerf/default/chair.txt` for the usage of hyperparameters. 
+4. You may refer to the comments in `./configs/synthetic-nerf/default/chair.txt` for the usage of hyperparameters. 
 
 For Synthetic-NeRF dataset, we provide the initial geometry from DVGO (which is the default one in our implementation) and from [MVS](https://drive.google.com/file/d/1m6ftmKU4lhxXQZKhkoeeWnC9F85kyMBu/view?usp=sharing). Feel free to try both (e.g., `use_geo = 1` and `pointfile = /your/mvs_file.txt`) to see the comparison. 
 
