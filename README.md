@@ -85,7 +85,7 @@ We visualize the local tensors of different scales into `./log/your_scene/rot_te
 ![visual image](image/visualization.png)
 
 
-## Why our local design are superior than original TensoRF against rotation
+## Why our local design is superior than original TensoRF against rotation
 <img src="image/rot-toy.jpg" width=480px />
 
 Here is a toy example to illustrate the TensoRF-CP (TensoRF-VM is similar) with global decomposition in (left) axis-aligned and (right) non-axis-aligned situations. The bottom shows the grid values.
