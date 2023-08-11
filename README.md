@@ -84,6 +84,13 @@ We visualize the local tensors of different scales into `./log/your_scene/rot_te
 
 ![visual image](image/visualization.png)
 
+## Why our local design are superior than original TensoRF against rotation
+![Teaser image](image/rot-toy.jpg)
+Here is a toy example to illustrate the TensoRF-CP (TensoRF-VM is similar) with global decomposition in (left) axis-aligned and (right) non-axis-aligned situations. The bottom shows the grid values.
+In axis-aligned case, only 1 component is needed to represent the scene (vector bases recover grid values by outer product). In non-axis-aligned case, however, 3 components
+are needed because the rank of matrix changes from 1 to 3 after scene rotation. While our design with local low-rank tensors can alleviate this issue, i.e., local tensors (2*2) are always rank-1 before and after rotation.
+
+
 ## Citation
 If you find our code or paper helps, please consider citing:
 ```
