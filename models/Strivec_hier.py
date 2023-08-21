@@ -698,7 +698,7 @@ class StrivecCP_hier(StrivecBase_hier):
         line_coef = []
         for l in range(lvl):
             for i in range(3):
-                line_coef.append(torch.nn.Parameter(scale * torch.randn((len(geo[l]), n_component[l][0], local_dims[l][i]))))
+                line_coef.append(torch.nn.Parameter(scale * torch.randn((len(geo[l]), n_component[l][0], local_dims[l][i]+1))))
         return torch.nn.ParameterList(line_coef).to(device)
 
 
