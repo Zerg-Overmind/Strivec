@@ -396,7 +396,7 @@ class StrivecBase_hier(TensorBase):
                ray_pts / norm * ((1+bg_len) - bg_len/norm)
                )
               
-                   
+               
                ray_id = torch.arange(ray_pts.shape[:2][0]).view(-1,1).expand(ray_pts.shape[:2]).flatten().cuda()
                step_id = torch.arange(ray_pts.shape[:2][1]).view(1,-1).expand(ray_pts.shape[:2]).flatten().cuda()
                
@@ -404,9 +404,9 @@ class StrivecBase_hier(TensorBase):
                t_min = torch.zeros_like(ray_id).cuda()
                mask_valid = torch.ones_like(step_id,dtype=torch.bool).cuda()
                stepSize = 0.02
-              
-               ### our cuda implementation of nonuniform ray sampling (scene warping) and find TopK for each sample point (considering tensor cvrg)
-               #ray_pts, mask_valid, ray_id, step_id, N_steps, t_min, t_max = search_geo_cuda.sample_pts_on_rays_cvrg_360(ray_pts, ray_id, step_id, rays_o_aft, rays_d_aft, self.tensoRF_cvrg_filter, self.units, self.aabb[0], self.aabb[1], near, far, stepSize)
+            
+               ### our cuda implementation of nonuniform ray sampling (scene warping) and find TopK for each sample point (considering tensor cvrg), but is not good if the initial geometry is not good.
+               #ray_pts, mask_valid, ray_id, step_id, N_steps, t_min, t_max = search_geo_cuda.sample_pts_on_rays_cvrg_360(rays_o_aft, rays_d_aft, self.tensoRF_cvrg_filter, self.units, self.aabb[0], self.aabb[1], near, far, stepSize)
 
                
             else:
@@ -698,7 +698,7 @@ class StrivecCP_hier(StrivecBase_hier):
         line_coef = []
         for l in range(lvl):
             for i in range(3):
-                line_coef.append(torch.nn.Parameter(scale * torch.randn((len(geo[l]), n_component[l][0], local_dims[l][i] + 1))))
+                line_coef.append(torch.nn.Parameter(scale * torch.randn((len(geo[l]), n_component[l][0], local_dims[l][i]))))
         return torch.nn.ParameterList(line_coef).to(device)
 
 
