@@ -65,7 +65,7 @@ def render_test(args, cluster_dict, geo, test_dataset, train_dataset):
 
     ckpt = torch.load(args.ckpt, map_location=device)
     kwargs = ckpt['kwargs']
-    kwargs.update({'device': device})
+    kwargs.update({'device': device}) 
     kwargs.update({'geo': geo, "args":args, "local_dims":args.local_dims_final})
 
     kwargs.update({'step_ratio': args.step_ratio})
@@ -146,27 +146,23 @@ def reconstruction(args, cluster_dict, geo, test_dataset, train_dataset):
     dim_lst = []
     # set upsample voxel dims
     if args.local_dims_trend is not None:
-        
         assert args.upsamp_list is not None and len(args.upsamp_list) == len(args.local_dims_trend[0]), "args.local_dims_trend and args.upsamp_list mismatch "
         for i in range(len(args.local_dims_trend)):
             level_dim_lst = []
             trend = torch.as_tensor(args.local_dims_trend[i], device="cuda")
             for j in range(len(args.local_dims_init[i])):
-                level_dim_lst.append(torch.floor(trend * args.local_dims_final[i][j] / args.local_dims_final[i][0]).long())
+                level_dim_lst.append(torch.floor(trend * args.local_dims_final[i][j] / args.local_dims_final[i][0]+0.01).long())
             dim_lst.append(torch.stack(level_dim_lst, dim=-1))
-
     else:
         for i in range(len(args.local_dims_init)):
             level_dim_lst = []
             for j in range(len(args.local_dims_init[i])):
                 level_dim_lst.append((torch.floor(torch.exp2(torch.linspace(np.log2(args.local_dims_init[i][j]-1), np.log2(args.local_dims_final[i][j]-1), len(args.upsamp_list)+1))/2)*2 + 1).long()[1:] if args.upsamp_list is not None else None)
             dim_lst.append(torch.stack(level_dim_lst, dim=-1))
-
     if args.upsamp_list is not None:
         local_dim_list = torch.stack(dim_lst, dim=1).tolist()
     else:
         local_dim_list = None
-
     torch.cuda.empty_cache()
     PSNRs,PSNRs_test = [],[0]
 
