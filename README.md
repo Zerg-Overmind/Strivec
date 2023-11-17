@@ -97,7 +97,7 @@ are needed because the rank of matrix changes from 1 to 3 after scene rotation. 
 If you find our code or paper helps, please consider citing:
 ```
 @INPROCEEDINGS{gao2023iCCV,
-  author = {Quankai Gao and Qiangeng Xu and Hao su and Ulrich Neumann and Zexiang Xu},
+  author = {Quankai Gao and Qiangeng Xu and Hao Su and Ulrich Neumann and Zexiang Xu},
   title = {Strivec: Sparse Tri-Vector Radiance Fields},
   booktitle = {Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)},
   year = {2023}
